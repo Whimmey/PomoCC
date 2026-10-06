@@ -1,1 +1,1 @@
-PomoCC-番茄钟监督_v%VERSION%.exe
+PomoCC-番茄钟监督.exe

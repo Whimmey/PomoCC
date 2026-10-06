@@ -68,8 +68,8 @@
 
 ## 下载与使用
 
-1. 到 [Releases](../../releases) 下载 **`PomoCC-番茄钟监督_v0.1.0.exe`** 和同名的 **`.exe.config`**
-   （版本号会随发布变化；两个文件必须放在同一个目录里，`.config` 是用来关掉框架自动 DPI 缩放的，删了界面会糊）
+1. 到 [Releases](../../releases) 下载 **`PomoCC-番茄钟监督.exe`** 和同名的 **`.exe.config`**
+   （文件名固定、不随版本变化，所以升级时直接覆盖同名文件即可，注册表里的开机自启路径也不用改；两个文件必须放在同一个目录里，`.config` 是用来关掉框架自动 DPI 缩放的，删了界面会糊）
 2. 双击运行。首次运行会让你设一个「退出 / 打开设置」用的密码 —— **记牢，忘了只能删配置重来**
 3. 进「设置 → 邮件设置」填监督人邮箱和发件邮箱（见下一节）
 4. 回主界面点「开始专注」
@@ -119,8 +119,8 @@ pwsh -File .\build.ps1
 产物在 `dist\`：
 
 ```
-dist\PomoCC-番茄钟监督_v0.1.0.exe          ← 单文件程序（约 150 KB）
-dist\PomoCC-番茄钟监督_v0.1.0.exe.config   ← 必须与 exe 放在一起
+dist\PomoCC-番茄钟监督.exe          ← 单文件程序（约 150 KB）
+dist\PomoCC-番茄钟监督.exe.config   ← 必须与 exe 放在一起
 dist\使用说明.txt            ← 面向非技术用户的图文说明
 ```
 
@@ -142,7 +142,7 @@ dist\使用说明.txt            ← 面向非技术用户的图文说明
 程序内置了一整套无界面自检（源码在 `src/SelfTest.cs`），改完代码请跑一遍：
 
 ```powershell
-$exe = '.\dist\PomoCC-番茄钟监督_v0.1.0.exe'
+$exe = '.\dist\PomoCC-番茄钟监督.exe'
 & $exe --selftest    .\tests\selftest.log      # 逻辑：配置往返/迁移、DPAPI、密码、规则阈值、状态机、邮件正文
 & $exe --smoketest   .\tests\smoketest.log     # 真实创建四个窗口并跑计时器
 & $exe --rendertest  .\tests\rendertest.log    # 把按钮/整窗渲染成位图数像素（文字重影、背景没擦、黑边）
