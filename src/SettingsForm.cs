@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.IO;
@@ -44,7 +44,7 @@ namespace PomodoroSupervisor
 
         // 规则页
         private NumberBox numFocus, numViolation, numSample;
-        private CheckBox chkOnlyAfter, chkAutoStart, chkTray;
+        private CheckBox chkOnlyAfter, chkAutoStart, chkTray, chkNotify, chkSound;
 
         public SettingsForm(Settings current)
             : this(current, null)
@@ -354,6 +354,15 @@ namespace PomodoroSupervisor
             Card cardOther = NewCard();
             TableLayoutPanel other = Ui.Stack();
             cardOther.Controls.Add(other);
+            Ui.Add(other, Section("专注完成时"));
+            chkNotify = new CheckBox();
+            StyleCheck(chkNotify, "弹托盘气泡提醒我这一段走完了");
+            chkSound = new CheckBox();
+            StyleCheck(chkSound, "播放提示音");
+            Ui.Add(other, chkNotify);
+            Ui.Add(other, chkSound);
+            Ui.Add(other, Hint("正常完成不告状，只提醒你自己；上面两个开关默认都开着。"));
+
             Ui.Add(other, Section("启动与安全"));
             chkAutoStart = new CheckBox();
             StyleCheck(chkAutoStart, "开机自动启动（缩在托盘里）");
@@ -728,6 +737,8 @@ namespace PomodoroSupervisor
             chkOnlyAfter.Checked = s.OnlyCountAfterStart;
             chkAutoStart.Checked = s.AutoStart;
             chkTray.Checked = s.TrayOnClose;
+            chkNotify.Checked = s.NotifyOnComplete;
+            chkSound.Checked = s.NotifySound;
 
             switch (s.SendMode)
             {
@@ -841,6 +852,8 @@ namespace PomodoroSupervisor
             s.OnlyCountAfterStart = chkOnlyAfter.Checked;
             s.AutoStart = chkAutoStart.Checked;
             s.TrayOnClose = chkTray.Checked;
+            s.NotifyOnComplete = chkNotify.Checked;
+            s.NotifySound = chkSound.Checked;
             return s;
         }
 

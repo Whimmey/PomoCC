@@ -5,8 +5,8 @@
 
 一个单文件 Windows 桌面小程序：番茄钟 + 监督程序进程监测 + 自动给监督人发告状邮件。
 
-- 当前版本：**0.1**（`App.Version` + `src/AssemblyInfo.cs` + README 三处要一起改）
-- 交付物：[dist/番茄钟监督.exe](dist/番茄钟监督.exe)（约 150 KB）+ [dist/番茄钟监督.exe.config](dist/番茄钟监督.exe.config)
+- 当前版本：**0.1**（`App.Version` + `src/AssemblyInfo.cs` + README 的版本号；产物**文件名**里的版本由 build.ps1 自动填入，不用手改）
+- 交付物：[dist/PomoCC-番茄钟监督_v0.1.0.exe](dist/PomoCC-番茄钟监督_v0.1.0.exe)（约 150 KB）+ [dist/PomoCC-番茄钟监督_v0.1.0.exe.config](dist/PomoCC-番茄钟监督_v0.1.0.exe.config)
 - 用户文档：[docs/使用说明.txt](docs/使用说明.txt)（构建时自动复制进 `dist/`）
 - 开源协议：Apache-2.0（[LICENSE](LICENSE)）
 - 需求来源：用户要求「有界面、双击能用的 Windows 小软件」，行为规则经用户确认并在后续反馈中细化：
@@ -44,7 +44,7 @@
 ```
 PomodoroSupervisor/
 ├─ build.ps1                 编译脚本（纯 ASCII；中文 exe 名从 exe-name.txt 显式按 UTF-8 读）
-├─ exe-name.txt              产物文件名（中文放在这里，避免脚本编码问题）
+├─ exe-name.txt              产物文件名模板 `PomoCC-番茄钟监督_v%VERSION%.exe`（中文与占位符放这里，规避脚本编码问题）
 ├─ src/
 │  ├─ App.cs                 入口、单实例互斥、命令行模式、开机自启注册表
 │  ├─ Theme.cs               配色、字体、圆角常量（设计像素基准 96 DPI）
@@ -71,8 +71,8 @@ PomodoroSupervisor/
 │  └─ images/                README 顶部那张主界面截图（入库，别被 .gitignore 掉）
 ├─ tests/                    自检输出（日志/截图），**不入库**，只留 .gitkeep
 └─ dist/                     构建产物，**不入库**（发布走 GitHub Releases）
-   ├─ 番茄钟监督.exe
-   ├─ 番茄钟监督.exe.config
+   ├─ PomoCC-番茄钟监督_v0.1.0.exe
+   ├─ PomoCC-番茄钟监督_v0.1.0.exe.config
    └─ 使用说明.txt            ← 由 build.ps1 从 docs/ 复制
 ```
 
@@ -96,8 +96,11 @@ pwsh -File .\build.ps1
 ```
 
 `build.ps1` 保持纯 ASCII：Windows PowerShell 会把无 BOM 的脚本按 ANSI 解码，
-脚本里直接写中文会导致乱码和语法错误。中文产物名改为从 `exe-name.txt` 用
-`Get-Content -Encoding UTF8` 读取。
+脚本里直接写中文会导致乱码和语法错误。中文产物名从 `exe-name.txt` 用
+`Get-Content -Encoding UTF8` 读取；名字里的 `%VERSION%` 会被替换成
+`src/AssemblyInfo.cs` 里 `AssemblyVersion` 的前三段（当前 `0.1.0`）。
+**发版只要改 AssemblyInfo + App.Version + README 的版本号**，产物名自动跟上。
+`$env:PS_EXE_NAME` 可临时覆盖整个名字（正式 exe 被占用时构建 dev 版用）。
 
 ## 监督规则表
 
@@ -178,34 +181,34 @@ Windows 把整个窗口当位图拉伸 1.25 倍 → 字模糊。
 
 ```powershell
 # 0a) 截图：把每个窗口渲染成 PNG（交付前必须逐张看过）
-.\dist\番茄钟监督.exe --shot .\tests\shots
+.\dist\PomoCC-番茄钟监督_v0.1.0.exe --shot .\tests\shots
 
 # 0b) 渲染自检：把按钮和整窗画进位图数像素，抓"文字重影/背景没擦/未绘制区域/文字被截断"
-.\dist\番茄钟监督.exe --rendertest .\tests\rendertest.log
+.\dist\PomoCC-番茄钟监督_v0.1.0.exe --rendertest .\tests\rendertest.log
 
 # 1) DPI 与布局：感知级别、系统 DPI、窗体缩放、字体渲染、四个窗口是否溢出、
 #    三个设置页签逐个检查、文字是否被截断
-.\dist\番茄钟监督.exe --dpicheck .\tests\dpicheck.log
+.\dist\PomoCC-番茄钟监督_v0.1.0.exe --dpicheck .\tests\dpicheck.log
 
 # 2) 逻辑自检：配置往返、旧配置迁移、DPAPI、密码、规则校验、逐条规则阈值、
 #    进程枚举与启动时间、程序目录枚举、状态机、邮件正文、名称回退规则
-.\dist\番茄钟监督.exe --selftest .\tests\selftest.log
+.\dist\PomoCC-番茄钟监督_v0.1.0.exe --selftest .\tests\selftest.log
 
 # 3) 界面冒烟：真实创建四个窗口并跑计时器，断言表格是 4 列且列名正确
-.\dist\番茄钟监督.exe --smoketest .\tests\smoketest.log
+.\dist\PomoCC-番茄钟监督_v0.1.0.exe --smoketest .\tests\smoketest.log
 
 # 4) 真实模式：注册表自启往返、托盘图标、单实例互斥、密码与规则持久化、密钥不明文落盘
-.\dist\番茄钟监督.exe --realsmoke .\tests\realsmoke.log
+.\dist\PomoCC-番茄钟监督_v0.1.0.exe --realsmoke .\tests\realsmoke.log
 
 # 5) 旧配置兼容：用临时目录加载指定 config.json，确认解析成功且密码散列没被动过
-.\dist\番茄钟监督.exe --loadcheck .\tests\loadcheck.log "%APPDATA%\PomodoroSupervisor\config.json"
+.\dist\PomoCC-番茄钟监督_v0.1.0.exe --loadcheck .\tests\loadcheck.log "%APPDATA%\PomodoroSupervisor\config.json"
 
 # 6) SMTP 连通性与加密握手（不登录、不发信）
-.\dist\番茄钟监督.exe --smtp-check .\tests\probe-qq587.log smtp.qq.com 587
+.\dist\PomoCC-番茄钟监督_v0.1.0.exe --smtp-check .\tests\probe-qq587.log smtp.qq.com 587
 
 # 7) 端到端发信：起本地假 SMTP，让程序按真实流程投递并核对报文
 node .\tools\fake-smtp.mjs 2560 .\tests\e2e-message.txt .\tests\e2e-session.txt .\tests\e2e-live.log
-.\dist\番茄钟监督.exe --mail-test .\tests\mailtest.log 127.0.0.1 2560
+.\dist\PomoCC-番茄钟监督_v0.1.0.exe --mail-test .\tests\mailtest.log 127.0.0.1 2560
 ```
 
 ### 已验证结果（7 项 exit code 全 0）
@@ -279,7 +282,7 @@ node .\tools\fake-smtp.mjs 2560 .\tests\e2e-message.txt .\tests\e2e-session.txt 
 | 启动文件夹（用户 + 公共） | 应无本项目快捷方式 |
 | 计划任务 / 服务 | 应无任何指向本项目的条目 |
 | `%TEMP%\pomodoro-*` | 自检的临时数据目录，跑完必须为 **0** |
-| 工作区里的 exe | 只应有 `dist\番茄钟监督.exe`（dev 版用完即删） |
+| 工作区里的 exe | 只应有 `dist\PomoCC-番茄钟监督_v0.1.0.exe`（dev 版用完即删） |
 
 ### 教训：离屏渲染 ≠ 真实渲染
 
@@ -293,7 +296,7 @@ node .\tools\fake-smtp.mjs 2560 .\tests\e2e-message.txt .\tests\e2e-session.txt 
 所以验证分两层：
 
 - 结构性检查用 `--shot` / `--rendertest`（改用 `WM_PRINT + PRF_CLIENT`，不带非客户区）/ `--dpicheck`；
-- 交付前必须做一次**屏幕实拍**：`POMODORO_DATA_DIR=<临时目录> POMODORO_NO_REGISTRY=1 番茄钟监督.exe --opensettings|--editminutes`，
+- 交付前必须做一次**屏幕实拍**：`POMODORO_DATA_DIR=<临时目录> POMODORO_NO_REGISTRY=1 PomoCC-番茄钟监督_v0.1.0.exe --opensettings|--editminutes`，
   再用 Pillow `ImageGrab` 截取窗口并逐像素采样（扫描时要用"暗且中性灰"的判据，
   而不是单纯阈值 —— 黑边像素的亮度和往往在 360 上下，用 sum<300 会漏掉）。
 
@@ -314,6 +317,10 @@ node .\tools\fake-smtp.mjs 2560 .\tests\e2e-message.txt .\tests\e2e-session.txt 
   **按每条规则各自的时长**判定，符合表格逐行配置的语义。
 - **睡眠不算专注**：每秒 tick 检测实际间隔，超过 15 秒视为睡眠/挂起，该段不计入专注时长。
 - **一段专注最多一封邮件**：`FocusSession.Reported` 保证「超时」告状后，即使随后点「放弃」也不重复发信。
+- **专注走完的提醒**：`Supervisor.Complete()` → `NotifyComplete()`：托盘气泡（走 `Notify` 事件）+ `SystemSounds.Asterisk`。
+  两个开关 `Settings.NotifyOnComplete` / `NotifySound` 默认开，可在「规则与其他」页关掉。
+  配置 **v1 → v2** 迁移要注意：老配置里没有这两个 bool 字段，反序列化后是 false（等于关），
+  `Store.Normalize` 里按 `Version < 2` 显式补成 true，否则老用户升级后提醒会**静默失效**。
 - **发送不阻塞界面**：邮件在线程池发送，结果通过事件回到界面（`BeginInvoke`）并用托盘气泡提示；
   失败时邮件全文保留在记录里，可手动补发。
 - **密码门禁**：退出、打开设置都需要密码；首运行引导设置（取消则用默认 `123456` 并明确告知）。

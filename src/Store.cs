@@ -107,6 +107,16 @@ namespace PomodoroSupervisor
             if (s.WatchList == null) s.WatchList = new List<string>();
             if (s.Rules == null) s.Rules = new List<WatchRule>();
             if (s.Version == 0) s.Version = 1;
+
+            // v2：新增「专注完成时提醒」（托盘气泡 + 提示音），默认开启。
+            // v1 配置里没有这两个字段，反序列化后是 false —— 必须显式补成 true，
+            // 否则升级上来的人会莫名其妙收不到完成提醒（而且是静默失效，很难发现）。
+            if (s.Version < 2)
+            {
+                s.NotifyOnComplete = true;
+                s.NotifySound = true;
+                s.Version = 2;
+            }
             if (s.FocusMinutes <= 0) s.FocusMinutes = d.FocusMinutes;
             if (s.ViolationSeconds <= 0) s.ViolationSeconds = d.ViolationSeconds;
             if (s.SampleSeconds <= 0) s.SampleSeconds = d.SampleSeconds;

@@ -192,13 +192,38 @@ namespace PomodoroSupervisor
         public void Complete()
         {
             if (Session == null) return;
+            int done = Settings.FocusMinutes;
             Stats.CompletedCount += 1;
             Stats.FocusSeconds += Session.PlannedSeconds;
             Store.SaveStats(Stats);
-            Store.Log("完成专注 " + Settings.FocusMinutes + " 分钟，未告状");
+            Store.Log("完成专注 " + done + " 分钟，未告状");
             Session = null;
             Raise();
+            NotifyComplete(done);
         }
+
+        /// <summary>专注走完时的提醒：托盘气泡 + 系统提示音，两项可各自在设置里关掉（默认都开）。</summary>
+        private void NotifyComplete(int minutes)
+        {
+            if (Settings.NotifyOnComplete)
+            {
+                CompleteNoticeCount++;
+                Notify(string.Format("专注完成：{0} 分钟走完了，休息一下。", minutes));
+            }
+            if (Settings.NotifySound)
+            {
+                SoundPlayCount++;
+                if (!App.Headless)
+                {
+                    try { System.Media.SystemSounds.Asterisk.Play(); }
+                    catch { }
+                }
+            }
+        }
+
+        /// <summary>供自检：气泡提醒 / 提示音各自触发了多少次。</summary>
+        internal static int CompleteNoticeCount;
+        internal static int SoundPlayCount;
 
         public void Abandon()
         {

@@ -97,6 +97,13 @@ namespace PomodoroSupervisor
         public bool OnlyCountAfterStart { get; set; }
         public bool AutoStart { get; set; }
         public bool TrayOnClose { get; set; }
+
+        // ---------- 专注完成时的提醒（配置 v2 起新增，默认开） ----------
+        // 老 v1 配置里没有这两个字段，反序列化后是 false（等于"关"），
+        // 所以 Store.Normalize 里按 Version < 2 显式补成 true，否则升级后提醒会静默失效。
+        public bool NotifyOnComplete { get; set; }     // 托盘气泡
+        public bool NotifySound { get; set; }          // 系统提示音
+
         public string PasswordHash { get; set; }
         public string PasswordSalt { get; set; }
 
@@ -111,7 +118,7 @@ namespace PomodoroSupervisor
         public static Settings Defaults()
         {
             Settings s = new Settings();
-            s.Version = 1;
+            s.Version = 2;
             s.UserName = Environment.UserName;
             s.SupervisorEmail = "";
             s.SendMode = "smtp";
@@ -130,6 +137,8 @@ namespace PomodoroSupervisor
             s.OnlyCountAfterStart = false;
             s.AutoStart = true;
             s.TrayOnClose = true;
+            s.NotifyOnComplete = true;
+            s.NotifySound = true;
             s.PasswordHash = "";
             s.PasswordSalt = "";
             s.MailSubjectTemplate = "";

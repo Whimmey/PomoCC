@@ -215,6 +215,48 @@ namespace PomodoroSupervisor
                 Check(sb, "legacy-pending-status-honest", mapped == "未确认（可能未发出）",
                     "旧「待发送」显示为「" + mapped + "」", ref fail);
 
+                // 13d. 专注走完的提醒：默认「气泡 + 提示音」都开，关掉开关后都不再触发
+                int notice0 = Supervisor.CompleteNoticeCount;
+                int sound0 = Supervisor.SoundPlayCount;
+
+                Settings notifyOn = Settings.Defaults();
+                notifyOn.FocusMinutes = 1;
+                notifyOn.Rules = new List<WatchRule>();
+                Supervisor supOn = new Supervisor(notifyOn, DailyStats.NewFor(DateTime.Now));
+                supOn.StartFocus();
+                supOn.Complete();
+                bool defOn = Supervisor.CompleteNoticeCount == notice0 + 1
+                          && Supervisor.SoundPlayCount == sound0 + 1
+                          && supOn.Stats.CompletedCount == 1;
+                Check(sb, "complete-notify-default-on", defOn,
+                    string.Format("默认开：气泡 +{0}、提示音 +{1}、今日完成 {2} 段",
+                        Supervisor.CompleteNoticeCount - notice0, Supervisor.SoundPlayCount - sound0,
+                        supOn.Stats.CompletedCount), ref fail);
+
+                Settings notifyOff = Settings.Defaults();
+                notifyOff.FocusMinutes = 1;
+                notifyOff.Rules = new List<WatchRule>();
+                notifyOff.NotifyOnComplete = false;
+                notifyOff.NotifySound = false;
+                Supervisor supOff = new Supervisor(notifyOff, DailyStats.NewFor(DateTime.Now));
+                supOff.StartFocus();
+                supOff.Complete();
+                bool muted = Supervisor.CompleteNoticeCount == notice0 + 1 && Supervisor.SoundPlayCount == sound0 + 1;
+                Check(sb, "complete-notify-switch-off", muted,
+                    "两个开关都关掉后：既不弹气泡也不出声音（计数没变）", ref fail);
+
+                // 13e. 老配置（v1，没有提醒字段）加载后必须默认开启 ——
+                //      否则老用户升级上来会静默收不到完成提醒（bool 默认 false 的坑）
+                string legacyCfg = "{\"Version\":1,\"FocusMinutes\":30,\"SampleSeconds\":5," +
+                                   "\"ViolationSeconds\":180,\"SendMode\":\"smtp\",\"SmtpHost\":\"smtp.qq.com\"," +
+                                   "\"SmtpPort\":587,\"Rules\":[]}";
+                File.WriteAllText(Store.ConfigPath, legacyCfg, new UTF8Encoding(false));
+                Settings migratedCfg = Store.LoadSettings();
+                Check(sb, "v1-config-notify-defaults-on",
+                    migratedCfg.NotifyOnComplete && migratedCfg.NotifySound && migratedCfg.Version >= 2,
+                    string.Format("v1 配置加载后：气泡={0}、提示音={1}、Version={2}",
+                        migratedCfg.NotifyOnComplete, migratedCfg.NotifySound, migratedCfg.Version), ref fail);
+
                 // 14. 邮件正文生成（含逐条规则时长 + 用户自定义名称）
                 FocusSession demo = Mailer.DemoSession(cfg);
                 string subject = Mailer.ComposeSubject(cfg, "中途放弃（没坚持够时间）", DateTime.Now, demo);

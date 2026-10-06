@@ -1,7 +1,8 @@
 # Build a single self-contained exe with the .NET Framework compiler that ships with Windows.
 # NOTE: keep this file pure ASCII. Windows PowerShell decodes a BOM-less script as ANSI,
 #       which would mangle any non-ASCII literal. The Chinese exe name lives in exe-name.txt
-#       and is read back with an explicit UTF-8 decode.
+#       (read back with an explicit UTF-8 decode) and may contain %VERSION%, which is
+#       replaced with the AssemblyVersion parsed out of src\AssemblyInfo.cs.
 $ErrorActionPreference = 'Stop'
 
 $root    = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -22,6 +23,25 @@ if ([string]::IsNullOrEmpty($exeName)) { throw "exe-name.txt is empty" }
 if (-not [string]::IsNullOrEmpty($env:PS_EXE_NAME)) {
   $exeName = $env:PS_EXE_NAME
   Write-Output ("Output name overridden via PS_EXE_NAME: " + $exeName)
+}
+
+# %VERSION% in the output name is filled from src\AssemblyInfo.cs (AssemblyVersion).
+# Single source of truth: the version in the file name and the version inside the exe
+# can never drift apart, and a release is just "bump AssemblyInfo + build".
+if ($exeName.Contains('%VERSION%')) {
+  $asmInfo = Join-Path $srcDir 'AssemblyInfo.cs'
+  $ver = $null
+  if (Test-Path $asmInfo) {
+    $m = Select-String -Path $asmInfo -Pattern 'AssemblyVersion\("([0-9]+)\.([0-9]+)\.([0-9]+)' | Select-Object -First 1
+    if ($m) {
+      $ver = $m.Matches[0].Groups[1].Value + '.' + $m.Matches[0].Groups[2].Value + '.' + $m.Matches[0].Groups[3].Value
+    }
+  }
+  if (-not $ver) {
+    throw "exe-name.txt uses %VERSION% but no AssemblyVersion was found in src\AssemblyInfo.cs"
+  }
+  $exeName = $exeName.Replace('%VERSION%', $ver)
+  Write-Output ("Version substituted into output name: v" + $ver)
 }
 
 $refNames = @(
