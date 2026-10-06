@@ -58,15 +58,39 @@ namespace PomodoroSupervisor
         public static string HistoryPath { get { return Path.Combine(Dir, "history.jsonl"); } }
         public static string LogPath { get { return Path.Combine(Dir, "app.log"); } }
 
+        // 日志只追加不清会慢慢变大（每次启动、每段专注都会写几行）。
+        // 超过上限就只保留最近一段，避免在用户机器上无限增长。
+        private const long LogMaxBytes = 512 * 1024;
+        private const long LogKeepBytes = 128 * 1024;
+
         public static void Log(string msg)
         {
             try
             {
+                FileInfo fi = new FileInfo(LogPath);
+                if (fi.Exists && fi.Length > LogMaxBytes) TrimLog();
                 File.AppendAllText(LogPath,
                     string.Format("{0:yyyy-MM-dd HH:mm:ss}  {1}\r\n", DateTime.Now, msg),
                     Encoding.UTF8);
             }
             catch { }
+        }
+
+        /// <summary>把日志截断成「只留最后一段」，并从第一个完整行开始（不切出半行）。</summary>
+        private static void TrimLog()
+        {
+            using (FileStream fs = new FileStream(LogPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
+            {
+                long start = Math.Max(0, fs.Length - LogKeepBytes);
+                fs.Seek(start, SeekOrigin.Begin);
+                byte[] buf = new byte[fs.Length - start];
+                int read = fs.Read(buf, 0, buf.Length);
+                string text = Encoding.UTF8.GetString(buf, 0, read);
+                int nl = text.IndexOf('\n');
+                if (nl >= 0) text = text.Substring(nl + 1);
+                File.WriteAllText(LogPath,
+                    "（日志超过上限，已截断只保留最近一段）\r\n" + text, Encoding.UTF8);
+            }
         }
 
         // ---------- 设置 ----------

@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.IO;
@@ -106,6 +106,13 @@ namespace PomodoroSupervisor
                 Check(sb, "settings-corrupt-fallback",
                     recovered != null && recovered.FocusMinutes == 25, "坏文件已回退到默认值", ref fail);
                 File.Delete(Store.ConfigPath + ".bad");
+
+                // 4b. 日志不会无限增长：超过上限自动截断，只留最近一段
+                for (int i = 0; i < 70; i++) Store.Log(new string('x', 10000));   // 约 700 KB
+                long logLen = new FileInfo(Store.LogPath).Length;
+                Check(sb, "log-is-capped", logLen <= 512 * 1024,
+                    string.Format("连续写入约 700 KB 后，app.log 只有 {0} KB（上限 512 KB）", logLen / 1024), ref fail);
+                File.Delete(Store.LogPath);
 
                 // 5. 授权码加密（DPAPI）
                 Settings sec = Settings.Defaults();
