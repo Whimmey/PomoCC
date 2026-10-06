@@ -1,0 +1,20 @@
+# 换行统一：仓库内存 LF，检出时按平台适配（Windows 上仍是 CRLF）。
+* text=auto
+
+# 明确文本文件类型
+*.cs       text
+*.ps1      text
+*.md       text
+*.txt      text
+*.json     text
+*.mjs      text
+*.config   text
+*.manifest text
+*.yml      text
+*.gitignore text
+
+# 二进制：不做任何换行/编码转换
+*.png  binary
+*.jpg  binary
+*.ico  binary
+*.exe  binary
