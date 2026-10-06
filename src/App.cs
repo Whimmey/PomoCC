@@ -13,6 +13,10 @@ namespace PomodoroSupervisor
         public const string ProductName = "番茄钟监督";
         public const string Version = "0.1";
 
+        /// <summary>项目主页与作者（设置窗口左下角的署名链接用它）。</summary>
+        public const string Author = "Whimmey";
+        public const string RepoUrl = "https://github.com/Whimmey/PomoCC";
+
         /// <summary>自检/冒烟测试模式：不弹窗、不发邮件、不写注册表。</summary>
         public static bool Headless;
         /// <summary>调试用：启动后直接打开设置窗口（截图自检用）。</summary>

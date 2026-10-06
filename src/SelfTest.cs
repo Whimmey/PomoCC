@@ -484,6 +484,13 @@ namespace PomodoroSupervisor
                     savedCount == 1 && sf2.Visible && !sf2.IsDisposed && sf2.SavedAnything,
                     string.Format("回调次数={0}，窗口仍打开={1}，状态「{2}」",
                         savedCount, sf2.Visible, sf2.SaveStateText), ref fail);
+                // 设置窗口左下角的署名：版本号 + 作者链接（可点区域应正好是作者名）
+                string credit = sf2.CreditInfo;
+                Check(sb, "settingsform-credit-block",
+                    credit.IndexOf("PomoCC " + App.Version) >= 0
+                    && credit.IndexOf("可点区域「" + App.Author + "」") >= 0
+                    && credit.IndexOf(App.RepoUrl) >= 0,
+                    credit, ref fail);
                 Check(sb, "settings-save-applied-values",
                     lastSaved != null && lastSaved.Rules != null && lastSaved.SupervisorEmail == "boss@example.com",
                     lastSaved == null ? "回调没拿到设置"
