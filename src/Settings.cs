@@ -52,7 +52,7 @@ namespace PomodoroSupervisor
             if (string.IsNullOrEmpty(Name)) Name = SoftwareText;
         }
 
-        /// <summary>名字里已经带了进程名就不再重复追加，否则补成「原神（game.exe）」。</summary>
+        /// <summary>名字里已经带了进程名就不再重复追加，否则补成「奶龙（game.exe）」。</summary>
         public static string BuildLabel(string name, string exe)
         {
             string n = name == null ? "" : name.Trim();

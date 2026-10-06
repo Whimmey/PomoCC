@@ -145,7 +145,7 @@ namespace PomodoroSupervisor
             cardList.Controls.Add(listStack);
             Ui.Add(listStack, Section("监督名单"));
             Ui.Add(listStack, Hint("专注期间这些程序在跑，就按各自规则计时。「名称」列默认和「软件」列一样，" +
-                                   "可以改成你认得出来的名字（比如把 game 改成「原神」），告状邮件里就用这个名字。"));
+                                   "可以改成你认得出来的名字（比如把 game 改成「奶龙」），告状邮件里就用这个名字。"));
 
             grid = BuildGrid();
             Ui.Add(listStack, grid);
@@ -563,7 +563,7 @@ namespace PomodoroSupervisor
             int i = grid.Rows.Add(r.Name, r.SoftwareText, r.LimitMinutes, "删除");
             grid.Rows[i].Tag = r;
             grid.Rows[i].Cells["colApp"].ToolTipText = string.IsNullOrEmpty(r.ExePath) ? r.Exe : r.ExePath;
-            grid.Rows[i].Cells["colName"].ToolTipText = "改成你认得出来的名字，例如「原神」";
+            grid.Rows[i].Cells["colName"].ToolTipText = "改成你认得出来的名字，例如「奶龙」";
             grid.Rows[i].Cells["colLimit"].ToolTipText = "专注期间这个程序累计跑超过多少分钟就告状";
             UpdateGridInfo();
         }

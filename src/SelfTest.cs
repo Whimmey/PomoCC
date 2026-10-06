@@ -256,14 +256,14 @@ namespace PomodoroSupervisor
                 Check(sb, "mail-data-block-never-lost", dataKept,
                     "用户怎么改，程序插入的数据块（含软件使用时长/时间线/今日累计）都还在", ref fail);
 
-                // 15. 「名称」列的自定义名字要出现在邮件里（exe 叫 game.exe 也能写成「原神」）
+                // 15. 「名称」列的自定义名字要出现在邮件里（exe 叫 game.exe 也能写成「奶龙」）
                 Settings named = Settings.Defaults();
                 named.FocusMinutes = 25;
                 named.Rules = new List<WatchRule>();
                 WatchRule custom = new WatchRule();
                 custom.Exe = "game.exe";
                 custom.DisplayName = "game";            // 程序自报的就是这种代称
-                custom.Name = "原神";                    // 用户在表格里改成的名字
+                custom.Name = "奶龙";                    // 用户在表格里改成的名字
                 custom.LimitMinutes = 3;
                 custom.Enabled = true;
                 named.Rules.Add(custom);
@@ -273,7 +273,7 @@ namespace PomodoroSupervisor
                 plain.DisplayName = "Steam";
                 plain.Enabled = true;
                 Check(sb, "rule-name-fallback",
-                    WatchRule.BuildLabel("原神", "game.exe") == "原神（game.exe）"
+                    WatchRule.BuildLabel("奶龙", "game.exe") == "奶龙（game.exe）"
                     && WatchRule.BuildLabel("Steam", "steam.exe") == "Steam（steam.exe）"
                     && WatchRule.BuildLabel("", "steam.exe") == "steam.exe"
                     && WatchRule.BuildLabel("带 steam.exe 的名字", "steam.exe") == "带 steam.exe 的名字",
@@ -281,11 +281,11 @@ namespace PomodoroSupervisor
 
                 FocusSession namedDemo = Mailer.DemoSession(named);
                 string namedBody = Mailer.ComposeBody(named, namedDemo, DailyStats.NewFor(DateTime.Now),
-                    "专注期间偷玩超时（原神）", DateTime.Now);
+                    "专注期间偷玩超时（奶龙）", DateTime.Now);
                 Check(sb, "custom-name-used-in-mail",
-                    namedBody.IndexOf("原神（game.exe）") >= 0,
-                    namedBody.IndexOf("原神（game.exe）") >= 0
-                        ? "邮件里用的是用户起的「原神」，并带上 game.exe 便于核对"
+                    namedBody.IndexOf("奶龙（game.exe）") >= 0,
+                    namedBody.IndexOf("奶龙（game.exe）") >= 0
+                        ? "邮件里用的是用户起的「奶龙」，并带上 game.exe 便于核对"
                         : "邮件里没有使用自定义名称", ref fail);
 
                 // 16. 名称默认值 = 软件列内容
@@ -1095,7 +1095,7 @@ namespace PomodoroSupervisor
                 seed.SetAuthCode("dummy-auth-code");
                 seed.Rules = new List<WatchRule>();
                 WatchRule r1 = new WatchRule();
-                r1.Exe = "game.exe"; r1.DisplayName = "game"; r1.Name = "原神"; r1.LimitMinutes = 1; r1.Enabled = true;
+                r1.Exe = "game.exe"; r1.DisplayName = "game"; r1.Name = "奶龙"; r1.LimitMinutes = 1; r1.Enabled = true;
                 WatchRule r2 = new WatchRule();
                 r2.Exe = "steam.exe"; r2.DisplayName = "Steam"; r2.Name = "Steam"; r2.LimitMinutes = 3; r2.Enabled = true;
                 WatchRule r3 = new WatchRule();
