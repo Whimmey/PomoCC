@@ -68,7 +68,7 @@ PomodoroSupervisor/
 ├─ tools/fake-smtp.mjs       端到端测试用的假 SMTP 服务器（Node）
 ├─ docs/
 │  ├─ 使用说明.txt            面向最终用户的说明（构建时复制到 dist/）
-│  └─ images/                README 用的 4 张截图（入库，别被 .gitignore 掉）
+│  └─ images/                README 顶部那张主界面截图（入库，别被 .gitignore 掉）
 ├─ tests/                    自检输出（日志/截图），**不入库**，只留 .gitkeep
 └─ dist/                     构建产物，**不入库**（发布走 GitHub Releases）
    ├─ 番茄钟监督.exe
