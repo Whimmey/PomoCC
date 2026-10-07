@@ -1585,6 +1585,23 @@ namespace PomoCC
                         lnkSound == null ? "-" : lnkSound.LinkBehavior.ToString(),
                         chkSnd == null ? "(无)" : chkSnd.Text), ref fail);
 
+                // 复选框文字与「提示音」链接必须在同一水平线上、同一行容器里。
+                // 用户上报过一次："提示音几个字和前面的文案没有对齐" —— 根因是当时用的是
+                // FlowLayoutPanel（按顶边摆孩子，复选框带方框更高 → 文字错开）。这条断言守住它。
+                bool rowAligned = false;
+                string alignDetail = "控件缺失";
+                if (lnkSound != null && chkSnd != null)
+                {
+                    int chkMid = chkSnd.Top + chkSnd.Height / 2;
+                    int lnkMid = lnkSound.Top + lnkSound.Height / 2;
+                    rowAligned = chkSnd.Parent == lnkSound.Parent          // 同一行容器
+                              && Math.Abs(chkMid - lnkMid) <= 1           // 垂直居中对齐（容差 1px）
+                              && lnkSound.Left >= chkSnd.Right - 2;        // 链接在复选框右边（同一行）
+                    alignDetail = string.Format("复选框中心 y={0}、链接中心 y={1}（差 {2}px）、同一父容器={3}",
+                        chkMid, lnkMid, Math.Abs(chkMid - lnkMid), chkSnd.Parent == lnkSound.Parent);
+                }
+                Check(sb, "settings-sound-row-aligned", rowAligned, alignDetail, ref fail);
+
                 // 说明：LinkLabel 的命中判定基于**真实光标位置**，而这里窗口在屏幕外，
                 // 合成鼠标消息点不到可点区域，所以直接触发它绑定的处理函数（同一段代码）。
                 int snd0 = Supervisor.SoundPlayCount;

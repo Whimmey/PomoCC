@@ -411,15 +411,26 @@ namespace PomoCC
             lnkSoundTest.LinkArea = new LinkArea(0, 3);           // 正好是「提示音」三个字
             lnkSoundTest.LinkClicked += OnSoundPreviewClicked;
 
-            FlowLayoutPanel soundRow = new FlowLayoutPanel();
-            soundRow.FlowDirection = FlowDirection.LeftToRight;
-            soundRow.WrapContents = false;
+            // 一行两列：复选框 + 「提示音」链接。
+            // 这里必须用 TableLayoutPanel：FlowLayoutPanel 按"顶边 + 外边距"摆放孩子，
+            // 而复选框带着方框（控件更高）、链接只有文字，两者顶边一对齐文字就错开了
+            // （用户一眼就看出来了）。TableLayoutPanel 里两个控件都 Anchor=Left 是**垂直居中**，
+            // 文字基线才对得齐，而且不受 DPI 影响。
+            TableLayoutPanel soundRow = new TableLayoutPanel();
+            soundRow.ColumnCount = 2;
+            soundRow.RowCount = 1;
             soundRow.AutoSize = true;
             soundRow.AutoSizeMode = AutoSizeMode.GrowAndShrink;
             soundRow.BackColor = Theme.Card;
             soundRow.Margin = new Padding(0);
-            soundRow.Controls.Add(chkSound);
-            soundRow.Controls.Add(lnkSoundTest);
+            soundRow.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+            soundRow.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+            chkSound.Anchor = AnchorStyles.Left;
+            chkSound.Margin = new Padding(0, 0, 0, 6);
+            lnkSoundTest.Anchor = AnchorStyles.Left;
+            lnkSoundTest.Margin = new Padding(4, 0, 0, 6);
+            soundRow.Controls.Add(chkSound, 0, 0);
+            soundRow.Controls.Add(lnkSoundTest, 1, 0);
 
             Ui.Add(other, chkNotify);
             Ui.Add(other, soundRow);
