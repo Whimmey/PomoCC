@@ -223,7 +223,7 @@ node .\tools\fake-smtp.mjs 2560 .\tests\e2e-message.txt .\tests\e2e-session.txt 
   四个窗口布局零溢出。
 - `--selftest`：**64 项全通过**（0.1 时 18 项 → 0.2 加后台计时/实例/状态机 → Re-v0.2 加规则快照/原子写/协议边界），
   含旧配置迁移、逐条规则阈值边界、「名称」默认值等于「软件」列、自定义名称进入邮件正文、睡眠与未知长间隔、并发与竞态。
-- `--smoketest`：**25 项全通过**；设置窗口的规则表格为 **4 列 × 3 行**，
+- `--smoketest`：**26 项全通过**；设置窗口的规则表格为 **4 列 × 3 行**，
   列名「名称 / 软件 / 规则时长（分钟） / 操作」。
 - `--realsmoke`：7 项全通过，注册表自启测试后恢复原状。
 - `--loadcheck`：直接加载用户真实的 `config.json`，解析成功、密码散列原样保留。
@@ -283,6 +283,15 @@ node .\tools\fake-smtp.mjs 2560 .\tests\e2e-message.txt .\tests\e2e-session.txt 
     新增断言 `settings-sound-row-aligned`（比较两者中心 y，容差 1px）；
     并且**验证过这条断言不是空的**：临时退回 `FlowLayoutPanel` 重跑，它如实报
     `FAIL ... 复选框中心 y=14、链接中心 y=16（差 2px）`。
+17. **「内容自定义」那行按钮显得拥挤、看着高度不统一（用户上报）**：实测两个按钮的
+    **控件高度本来就是一样的**（都是 36 设计 px → 125% 下 48px，绘制用的是同一个
+    `(0,0,W-1,H-1)` 矩形），真正的毛病是 `Ui.ButtonRow` 给的外边距是 `(0,0,10,0)` ——
+    **上下都没有留白**，按钮紧贴上一行输入框和下面的标题，视觉上就显得挤、也显得不齐。
+    修法：`Ui.ButtonRow` 统一把一行里所有按钮的高度取最大值对齐，并改成
+    `Margin = (0,6,10,8)`（上 6 / 下 8 设计 px），既垂直居中又有下边沿余量；
+    对这个页面所有按钮行都生效（监督名单 / 邮件设置 / 内容自定义 / 规则与其他）。
+    新增断言 `settings-content-buttons-uniform`（等高、同 Top、上下外边距 > 0、
+    行高只留给外边距），实测量到 `高度 48/48、Top 8/8、上/下外边距 8/10px、行高 66`。
 
 ### 开发期残留自查（每次交付前跑一遍）
 
@@ -357,6 +366,7 @@ Re-v0.2 复审收尾新增（同样在 `SelfTest.cs`）：
 | `render-apppicker-has-accent` / `render-apppicker-button-state` | 主按钮按启用/禁用两种**正确**状态各自验证（列表为空时禁用是对的，不要求主色） |
 | `settings-sound-preview-link` / `settings-sound-preview-plays` | 设置里「提示音」三个字是可点链接（蓝字下划线，区域正好 3 个字），点了会播放 |
 | `settings-sound-row-aligned` | 复选框文字与「提示音」链接**垂直居中对齐**（容差 1px）、同一行、链接在右边 |
+| `settings-content-buttons-uniform` | 同一行按钮**等高、同一水平线、上下都留了白**（用户要求"统一、别太挤"） |
 | `sound-clip-valid` / `sound-played-is-ours` | 合成的提示音是合法 PCM（时长/峰值不削顶）、且完成提醒响的就是这一声 |
 
 ### 测试对环境的要求（DPAPI 与用户配置文件）

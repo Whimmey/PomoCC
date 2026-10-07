@@ -659,9 +659,16 @@ namespace PomoCC
             f.AutoSizeMode = AutoSizeMode.GrowAndShrink;
             f.Dock = DockStyle.Top;
             f.Margin = new Padding(0);
+
+            // 同一行里的按钮**高度统一**（取最高的那个）：形状不一致会显得很杂乱
+            int h = 0;
+            for (int i = 0; i < buttons.Length; i++)
+                if (buttons[i].Height > h) h = buttons[i].Height;
             for (int i = 0; i < buttons.Length; i++)
             {
-                buttons[i].Margin = new Padding(0, 0, 10, 0);
+                if (h > 0) buttons[i].Height = h;
+                // 上下都留一点：既让按钮在行里**垂直居中**，下边沿也不至于贴住下一个控件
+                buttons[i].Margin = new Padding(0, 6, 10, 8);
                 f.Controls.Add(buttons[i]);
             }
             return f;

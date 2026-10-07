@@ -1612,6 +1612,30 @@ namespace PomoCC
                     string.Format("触发「提示音」链接绑定的处理函数：播放计数 +{0}，播放的是「{1}」（与真触发共用同一处播放实现）",
                         Supervisor.SoundPlayCount - snd0, SoundBank.LastPlayed), ref fail);
 
+                // 「邮件设置 → 内容自定义」那两个按钮：必须等高、同一条水平线、而且下边沿留了白
+                // （用户要求"两个 btn 高度要一样，显得统一一点""下边沿多几个 px 免得过于紧凑"）
+                ClickNav(sf2, "邮件设置");
+                Pump(400);
+                FlatButton bReset = FindButton(sf2, "恢复默认内容");
+                FlatButton bPrev = FindButton(sf2, "预览效果");
+                bool btnsUniform = false;
+                string btnsDetail = "按钮没找到";
+                if (bReset != null && bPrev != null && bReset.Parent != null)
+                {
+                    Control row = bReset.Parent;
+                    int gapBelow = row.Height - (bReset.Top + bReset.Height);
+                    btnsUniform = bReset.Parent == bPrev.Parent            // 同一行
+                               && bReset.Height == bPrev.Height            // 等高
+                               && bReset.Top == bPrev.Top                  // 同一条水平线（等高了就等于垂直居中）
+                               && bReset.Margin.Top > 0 && bReset.Margin.Bottom >= 4
+                               && bPrev.Margin.Bottom >= 4
+                               && gapBelow <= bReset.Margin.Bottom;        // 行高只留给外边距，不多余
+                    btnsDetail = string.Format("高度 {0}/{1}、Top {2}/{3}、上/下外边距 {4}/{5}px、行高 {6}（按钮下方余量 {7}px）",
+                        bReset.Height, bPrev.Height, bReset.Top, bPrev.Top,
+                        bReset.Margin.Top, bReset.Margin.Bottom, row.Height, gapBelow);
+                }
+                Check(sb, "settings-content-buttons-uniform", btnsUniform, btnsDetail, ref fail);
+
                 Check(sb, "settingsform-credit-block",
                     credit.IndexOf("PomoCC " + App.Version) >= 0
                     && credit.IndexOf("可点区域「" + App.Author + "」") >= 0
