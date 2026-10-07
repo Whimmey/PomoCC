@@ -434,9 +434,8 @@ namespace PomoCC
 
             Ui.Add(other, chkNotify);
             Ui.Add(other, soundRow);
-            Ui.Add(other, Hint(string.Format("提示音固定是「{0}」（一声短促的木琴敲击，点上面的「提示音」可以试听）。",
-                SoundBank.Name)));
-            Ui.Add(other, Hint("正常完成不告状，只提醒你自己；上面两个开关默认都开着。"));
+            // 就一句话，别堆灰字（用户：那两行说明都多余）
+            Ui.Add(other, Hint("点击提示音试听"));
 
             Ui.Add(other, Section("启动与安全"));
             chkAutoStart = new CheckBox();
