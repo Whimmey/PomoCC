@@ -203,7 +203,7 @@ Windows 把整个窗口当位图拉伸 1.25 倍 → 字模糊。
 .\dist\PomoCC-番茄钟监督.exe --realsmoke .\tests\realsmoke.log
 
 # 5) 旧配置兼容：用临时目录加载指定 config.json，确认解析成功且密码散列没被动过
-.\dist\PomoCC-番茄钟监督.exe --loadcheck .\tests\loadcheck.log "%APPDATA%\PomodoroSupervisor\config.json"
+.\dist\PomoCC-番茄钟监督.exe --loadcheck .\tests\loadcheck.log "%APPDATA%\PomoCC\config.json"
 
 # 6) SMTP 连通性与加密握手（不登录、不发信）
 .\dist\PomoCC-番茄钟监督.exe --smtp-check .\tests\probe-qq587.log smtp.qq.com 587
@@ -269,9 +269,9 @@ node .\tools\fake-smtp.mjs 2560 .\tests\e2e-message.txt .\tests\e2e-session.txt 
     `PomodoroSupervisor` 这个真实值名做写入/删除测试，还用
     `Apply(startWasEnabled)` 恢复 —— 而 `startWasEnabled` 是在切到测试值名之后读的，
     永远是 false，于是把用户的自启项删掉了。现在改用测试专用值名
-    `PomodoroSupervisorSelfTest`，并用 `ReadReal()/RestoreReal()` **原样**恢复。
+    `PomoCCSelfTest`，并用 `ReadReal()/RestoreReal()` **原样**恢复。
 15. **自检在 `%TEMP%` 里堆了 177 个临时数据目录**：现在所有临时目录统一登记，
-    `Main` 的 `finally` 里统一删除（要保留用 `POMODORO_KEEP_TEMP=1`）。
+    `Main` 的 `finally` 里统一删除（要保留用 `POMOCC_KEEP_TEMP=1`）。
 
 ### 开发期残留自查（每次交付前跑一遍）
 
@@ -279,11 +279,11 @@ node .\tools\fake-smtp.mjs 2560 .\tests\e2e-message.txt .\tests\e2e-session.txt 
 
 | 落点 | 检查 |
 |---|---|
-| `HKCU\…\CurrentVersion\Run` / `RunOnce` | 只应有 **一条** `PomodoroSupervisor`，且指向正式 exe |
+| `HKCU\…\CurrentVersion\Run` / `RunOnce` | 只应有 **一条** `PomoCC`，且指向正式 exe |
 | `HKLM\…\Run`（含 WOW6432Node） | 应无本项目条目 |
 | 启动文件夹（用户 + 公共） | 应无本项目快捷方式 |
 | 计划任务 / 服务 | 应无任何指向本项目的条目 |
-| `%TEMP%\pomodoro-*` | 自检的临时数据目录，跑完必须为 **0** |
+| `%TEMP%\pomocc-*` | 自检的临时数据目录，跑完必须为 **0** |
 | 工作区里的 exe | 只应有 `dist\PomoCC-番茄钟监督.exe`（dev 版用完即删） |
 
 ### 教训：离屏渲染 ≠ 真实渲染
@@ -298,7 +298,7 @@ node .\tools\fake-smtp.mjs 2560 .\tests\e2e-message.txt .\tests\e2e-session.txt 
 所以验证分两层：
 
 - 结构性检查用 `--shot` / `--rendertest`（改用 `WM_PRINT + PRF_CLIENT`，不带非客户区）/ `--dpicheck`；
-- 交付前必须做一次**屏幕实拍**：`POMODORO_DATA_DIR=<临时目录> POMODORO_NO_REGISTRY=1 PomoCC-番茄钟监督.exe --opensettings|--editminutes`，
+- 交付前必须做一次**屏幕实拍**：`POMOCC_DATA_DIR=<临时目录> POMOCC_NO_REGISTRY=1 PomoCC-番茄钟监督.exe --opensettings|--editminutes`，
   再用 Pillow `ImageGrab` 截取窗口并逐像素采样（扫描时要用"暗且中性灰"的判据，
   而不是单纯阈值 —— 黑边像素的亮度和往往在 360 上下，用 sum<300 会漏掉）。
 
@@ -313,6 +313,13 @@ node .\tools\fake-smtp.mjs 2560 .\tests\e2e-message.txt .\tests\e2e-session.txt 
 
 ## 关键实现细节
 
+- **改名（0.1 起）**：数据目录、注册表值名、互斥体、HTTP User-Agent、邮件 X-Mailer 全部叫 `PomoCC`，
+  只有**代码仓库根目录**还叫 `PomodoroSupervisor`。改名靠两处一次性迁移，缺一个就会出问题：
+  `Store.MigrateLegacyData()`（`%APPDATA%\PomodoroSupervisor` → `%APPDATA%\PomoCC`，
+  搬完 4 个文件并删掉旧目录 —— 不搬用户会以为设置和密码丢了，不删会留个空目录）和
+  `AutoStart.RemoveLegacyValue()`（删掉老注册表值名，否则两条自启项会开机启动两次）。
+  自检用 `Store.RoamingRootOverride` 把「漫游根」指到临时目录来验证迁移；
+  环境变量同时认新名与旧名（`POMOCC_*` 优先，`POMODORO_*` 兜底），防止改名后漏掉开关。
 - **规则表**：每条 `WatchRule` = 进程名 + 程序自报名 + 用户名称 + 路径 + 规则时长 + 是否启用。
   旧版配置里的「一串进程名」会在加载时自动迁移（时长沿用旧的全局值）。
 - **偷玩时长按采样累加**：每 `SampleSeconds`（默认 5 秒）枚举一次命中规则的进程，

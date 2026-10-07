@@ -4,7 +4,7 @@ using System.Drawing.Drawing2D;
 using System.Runtime.InteropServices;
 using System.Windows.Forms;
 
-namespace PomodoroSupervisor
+namespace PomoCC
 {
     public class MainForm : Form
     {

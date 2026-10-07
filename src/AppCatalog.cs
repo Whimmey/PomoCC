@@ -4,7 +4,7 @@ using System.Diagnostics;
 using System.Drawing;
 using System.IO;
 
-namespace PomodoroSupervisor
+namespace PomoCC
 {
     /// <summary>一个可以加入监督名单的程序（供选择界面和自检使用）。</summary>
     public class RunningAppInfo

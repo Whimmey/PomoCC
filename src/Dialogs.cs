@@ -4,7 +4,7 @@ using System.Drawing;
 using System.Runtime.InteropServices;
 using System.Windows.Forms;
 
-namespace PomodoroSupervisor
+namespace PomoCC
 {
     /// <summary>
     /// 主面板点「程序」弹出的只读窗口：和监督名单一样的列（名称 / 软件 / 规则时长），

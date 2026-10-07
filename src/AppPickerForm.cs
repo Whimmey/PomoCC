@@ -4,7 +4,7 @@ using System.Drawing;
 using System.IO;
 using System.Windows.Forms;
 
-namespace PomodoroSupervisor
+namespace PomoCC
 {
     /// <summary>
     /// 「从正在运行的程序里选」——不用手敲进程名。

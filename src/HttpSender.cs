@@ -3,7 +3,7 @@ using System.IO;
 using System.Net;
 using System.Text;
 
-namespace PomodoroSupervisor
+namespace PomoCC
 {
     /// <summary>四种 HTTP 发信通道，都是免费额度可用的。</summary>
     public static class HttpSender
@@ -71,7 +71,7 @@ namespace PomodoroSupervisor
             req.ContentType = "application/json; charset=utf-8";
             req.Timeout = 30000;
             req.ReadWriteTimeout = 30000;
-            req.UserAgent = "PomodoroSupervisor/1.0";
+            req.UserAgent = "PomoCC/" + App.Version;
             if (!string.IsNullOrEmpty(authValue) && authValue != "Bearer ")
                 req.Headers[authHeader] = authValue;
 

@@ -4,7 +4,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Web.Script.Serialization;
 
-namespace PomodoroSupervisor
+namespace PomoCC
 {
     /// <summary>一条监督规则：某个程序 + 它在专注期间允许跑多久。</summary>
     public class WatchRule

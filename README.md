@@ -77,8 +77,8 @@
 > 仓库目前还没有 Release 包，你也可以按下面的「从源码构建」自己编译，一分钟出结果。
 
 **它是绿色软件：** 不写系统目录、不装服务、不加驱动。
-卸载 = 删掉 exe 目录，再删掉数据目录 `%APPDATA%\PomodoroSupervisor\`；
-如果开过开机自启，在设置里关掉即可（它会删掉注册表里 `HKCU\...\Run\PomodoroSupervisor` 这一项）。
+卸载 = 删掉 exe 目录，再删掉数据目录 `%APPDATA%\PomoCC\`；
+如果开过开机自启，在设置里关掉即可（它会删掉注册表里 `HKCU\...\Run\PomoCC` 这一项）。
 
 ## 📧 配置发信邮箱
 
@@ -149,7 +149,7 @@ $exe = '.\dist\PomoCC-番茄钟监督.exe'
 & $exe --dpicheck    .\tests\dpicheck.log      # DPI 感知 + 四个窗口 + 三个设置页签的布局零溢出
 & $exe --realsmoke   .\tests\realsmoke.log     # 注册表自启往返、托盘图标、单实例互斥、密钥不明文落盘
 & $exe --shot        .\tests\shots             # 每个窗口渲染成 PNG，交付前逐张看
-& $exe --loadcheck   .\tests\loadcheck.log "%APPDATA%\PomodoroSupervisor\config.json"   # 旧配置兼容
+& $exe --loadcheck   .\tests\loadcheck.log "%APPDATA%\PomoCC\config.json"   # 旧配置兼容
 & $exe --smtp-check  .\tests\probe.log smtp.qq.com 587                                  # SMTP 握手（不登录）
 # 端到端发信（本地假 SMTP，不发真邮件）
 node .\tools\fake-smtp.mjs 2560 .\tests\e2e-message.txt .\tests\e2e-session.txt .\tests\e2e-live.log
@@ -157,7 +157,7 @@ node .\tools\fake-smtp.mjs 2560 .\tests\e2e-message.txt .\tests\e2e-session.txt 
 ```
 
 自检**不会**碰你的真实配置和真实开机自启项（用临时数据目录 + 测试专用注册表值名），
-跑完会自己清理临时目录。要留着排查用 `POMODORO_KEEP_TEMP=1`。
+跑完会自己清理临时目录。要留着排查用 `POMOCC_KEEP_TEMP=1`。
 
 ## 工作原理
 
@@ -170,7 +170,7 @@ node .\tools\fake-smtp.mjs 2560 .\tests\e2e-message.txt .\tests\e2e-session.txt 
 ## 🔒 隐私与安全
 
 - **没有账号、没有遥测、没有云同步。** 程序只在你配置了发信邮箱后才会联网，且只发告状邮件/测试邮件
-- 所有数据都在本机 `%APPDATA%\PomodoroSupervisor\`：`config.json`（设置）、`history.jsonl`（告状记录）、`stats.json`（今日计数）、`app.log`
+- 所有数据都在本机 `%APPDATA%\PomoCC\`：`config.json`（设置）、`history.jsonl`（告状记录）、`stats.json`（今日计数）、`app.log`
 - 邮箱授权码 / API Key 用 **Windows DPAPI**（`ProtectedData`）加密，绑定当前 Windows 用户 —— 配置文件被拷走也读不出密钥
 - 退出密码只存 **PBKDF2-SHA1（60000 次迭代 + 随机盐）** 的散列
 - 写开机自启项是**幂等**的：值没变化就一个字节都不写注册表（否则安全软件会把每次启动都当成「企图开机自启动」而反复弹窗）

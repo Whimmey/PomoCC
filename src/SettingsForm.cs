@@ -4,7 +4,7 @@ using System.Drawing;
 using System.IO;
 using System.Windows.Forms;
 
-namespace PomodoroSupervisor
+namespace PomoCC
 {
     public class SettingsForm : Form
     {

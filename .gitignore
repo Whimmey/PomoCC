@@ -35,7 +35,7 @@ obj/
 !/tests/.gitkeep
 
 # ---------- 运行时数据（隐私相关，务必不要提交）----------
-# 真实数据在 %APPDATA%\PomodoroSupervisor\ 下。这里只是兜底：
+# 真实数据在 %APPDATA%\PomoCC\ 下。这里只是兜底：
 # config.json 含 DPAPI 加密的邮箱授权码与密码散列，
 # history.jsonl 含告状记录全文，都绝不能进仓库。
 config.json

@@ -4,7 +4,7 @@ using System.IO;
 using System.Text;
 using System.Web.Script.Serialization;
 
-namespace PomodoroSupervisor
+namespace PomoCC
 {
     public class DailyStats
     {
@@ -38,19 +38,78 @@ namespace PomodoroSupervisor
         /// <summary>仅供自检使用，指向临时目录以免污染真实数据。</summary>
         public static string OverrideDir;
 
+        /// <summary>仅供自检：替换 %APPDATA% 这个「漫游根」，从而能验证目录改名迁移。</summary>
+        internal static string RoamingRootOverride;
+
+        /// <summary>数据目录名。</summary>
+        public const string DataFolderName = "PomoCC";
+        /// <summary>老版本的数据目录名，仅用于一次性迁移。</summary>
+        internal const string LegacyDataFolderName = "PomodoroSupervisor";
+
+        private const string ConfigFileName = "config.json";
+
         private static JavaScriptSerializer Ser = new JavaScriptSerializer();
+
+        private static string RoamingRoot
+        {
+            get
+            {
+                return string.IsNullOrEmpty(RoamingRootOverride)
+                    ? Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData)
+                    : RoamingRootOverride;
+            }
+        }
 
         public static string Dir
         {
             get
             {
                 if (!string.IsNullOrEmpty(OverrideDir)) return OverrideDir;
-                string d = Path.Combine(
-                    Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-                    "PomodoroSupervisor");
+                string d = Path.Combine(RoamingRoot, DataFolderName);
                 Directory.CreateDirectory(d);
+                MigrateLegacyData(d);
                 return d;
             }
+        }
+
+        /// <summary>
+        /// 数据目录改名：%APPDATA%\PomodoroSupervisor → %APPDATA%\PomoCC。
+        /// 第一次运行时把老目录里的文件搬过来（配置/统计/记录/日志），确认能读出来之后删掉老目录 ——
+        /// 不搬的话用户会以为"设置、密码、授权码全丢了"，不删的话机器上会多留一个空目录。
+        /// </summary>
+        private static void MigrateLegacyData(string newDir)
+        {
+            try
+            {
+                string newCfg = Path.Combine(newDir, ConfigFileName);
+                if (File.Exists(newCfg)) return;                  // 新目录已有配置：绝不覆盖
+                string oldDir = Path.Combine(RoamingRoot, LegacyDataFolderName);
+                if (!Directory.Exists(oldDir)) return;
+                if (!File.Exists(Path.Combine(oldDir, ConfigFileName))) return;   // 老目录没配置，没什么可搬
+
+                string[] files = { ConfigFileName, "stats.json", "history.jsonl", "app.log" };
+                for (int i = 0; i < files.Length; i++)
+                {
+                    string src = Path.Combine(oldDir, files[i]);
+                    if (File.Exists(src)) File.Copy(src, Path.Combine(newDir, files[i]), true);
+                }
+
+                // 确认新配置真的读得出来，再删老目录
+                string text = File.ReadAllText(newCfg, Encoding.UTF8);
+                if (text.Trim().Length == 0) return;
+                try { Directory.Delete(oldDir, true); }
+                catch { return; }                                 // 删不掉就留着，至少数据已经搬过来了
+
+                // 注意：这里不能调 Log() —— Log 会走 LogPath → Dir → 重新进入本方法。直接写文件。
+                try
+                {
+                    File.AppendAllText(Path.Combine(newDir, "app.log"),
+                        string.Format("{0:yyyy-MM-dd HH:mm:ss}  数据目录已从 {1} 迁移到 {2}\r\n",
+                            DateTime.Now, LegacyDataFolderName, DataFolderName), Encoding.UTF8);
+                }
+                catch { }
+            }
+            catch { }
         }
 
         public static string ConfigPath { get { return Path.Combine(Dir, "config.json"); } }

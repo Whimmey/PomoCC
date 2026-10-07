@@ -9,7 +9,7 @@ using System.Security.Authentication;
 using System.Security.Cryptography.X509Certificates;
 using System.Text;
 
-namespace PomodoroSupervisor
+namespace PomoCC
 {
     /// <summary>
     /// 自带 SMTP 客户端：同时支持 465（隐式 SSL）与 587/25（STARTTLS）。
@@ -152,7 +152,7 @@ namespace PomodoroSupervisor
             sb.Append("MIME-Version: 1.0\r\n");
             sb.Append("Content-Type: text/plain; charset=UTF-8\r\n");
             sb.Append("Content-Transfer-Encoding: base64\r\n");
-            sb.Append("X-Mailer: PomodoroSupervisor\r\n");
+            sb.Append("X-Mailer: PomoCC " + App.Version + "\r\n");
             sb.Append("\r\n");
 
             string b64 = Convert.ToBase64String(Encoding.UTF8.GetBytes(body));

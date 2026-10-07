@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 
-namespace PomodoroSupervisor
+namespace PomoCC
 {
     /// <summary>一个被监视的程序实例。</summary>
     public class WatchProcess

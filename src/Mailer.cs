@@ -2,7 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Text;
 
-namespace PomodoroSupervisor
+namespace PomoCC
 {
     /// <summary>占位符说明（设置界面里展示给用户看）。</summary>
     public class PlaceholderInfo

@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.IO;
@@ -7,7 +7,7 @@ using System.Text;
 using System.Threading;
 using System.Windows.Forms;
 
-namespace PomodoroSupervisor
+namespace PomoCC
 {
     /// <summary>无界面自检：验证配置、加密、规则表、进程枚举、邮件内容生成、DPI 适配。</summary>
     public static class SelfTest
@@ -30,7 +30,7 @@ namespace PomodoroSupervisor
         /// </summary>
         internal static void CleanupTempDirs()
         {
-            if (Environment.GetEnvironmentVariable("POMODORO_KEEP_TEMP") == "1") return;
+            if (App.EnvFlag("POMOCC_KEEP_TEMP", "POMODORO_KEEP_TEMP")) return;
             lock (TempDirs)
             {
                 for (int i = 0; i < TempDirs.Count; i++)
@@ -63,7 +63,7 @@ namespace PomodoroSupervisor
 
             try
             {
-                Store.OverrideDir = TempDir("pomodoro-selftest");
+                Store.OverrideDir = TempDir("pomocc-selftest");
                 sb.Append("数据目录（临时）：").Append(Store.OverrideDir).Append("\r\n\r\n");
 
                 // 1. 默认配置
@@ -113,6 +113,45 @@ namespace PomodoroSupervisor
                 Check(sb, "log-is-capped", logLen <= 512 * 1024,
                     string.Format("连续写入约 700 KB 后，app.log 只有 {0} KB（上限 512 KB）", logLen / 1024), ref fail);
                 File.Delete(Store.LogPath);
+
+                // 4c. 改名一致性 + 数据目录改名迁移（%APPDATA%\PomodoroSupervisor → %APPDATA%\PomoCC）
+                Check(sb, "naming-is-pomocc",
+                    Store.DataFolderName == "PomoCC" && AutoStart.MainValueName == "PomoCC"
+                    && AutoStart.LegacyValueName == "PomodoroSupervisor"
+                    && App.MutexName.StartsWith("PomoCC"),
+                    string.Format("数据目录={0}；注册表值名={1}（旧名 {2} 会被清理）；互斥体={3}",
+                        Store.DataFolderName, AutoStart.MainValueName, AutoStart.LegacyValueName, App.MutexName), ref fail);
+
+                string roam = TempDir("pomocc-roam");
+                string oldDataDir = Path.Combine(roam, Store.LegacyDataFolderName);
+                Directory.CreateDirectory(oldDataDir);
+                File.WriteAllText(Path.Combine(oldDataDir, "config.json"),
+                    "{\"Version\":2,\"FocusMinutes\":33,\"SampleSeconds\":5,\"ViolationSeconds\":180," +
+                    "\"SendMode\":\"smtp\",\"SmtpHost\":\"smtp.qq.com\",\"SmtpPort\":587,\"Rules\":[]}", Encoding.UTF8);
+                File.WriteAllText(Path.Combine(oldDataDir, "history.jsonl"),
+                    "{\"Time\":\"2026-01-01 00:00:00\",\"Reason\":\"中途放弃\",\"Status\":\"已发送\"}\r\n", Encoding.UTF8);
+
+                string savedOverride = Store.OverrideDir;
+                Store.OverrideDir = null;                 // 让 Store.Dir 走真实逻辑（沙箱漫游根）
+                Store.RoamingRootOverride = roam;
+                try
+                {
+                    string newDataDir = Store.Dir;
+                    Settings dirCfg = Store.LoadSettings();
+                    bool movedOk = newDataDir == Path.Combine(roam, Store.DataFolderName)
+                                && File.Exists(Path.Combine(newDataDir, "config.json"))
+                                && File.Exists(Path.Combine(newDataDir, "history.jsonl"))
+                                && dirCfg.FocusMinutes == 33            // 老配置真的搬过来了并生效
+                                && !Directory.Exists(oldDataDir);       // 老目录删掉，不留空目录垃圾
+                    Check(sb, "data-dir-rename-migration", movedOk,
+                        string.Format("新目录 {0}；迁移后专注 {1} 分钟；老目录已清理={2}",
+                            Path.GetFileName(newDataDir), dirCfg.FocusMinutes, !Directory.Exists(oldDataDir)), ref fail);
+                }
+                finally
+                {
+                    Store.RoamingRootOverride = null;
+                    Store.OverrideDir = savedOverride;
+                }
 
                 // 5. 授权码加密（DPAPI）
                 Settings sec = Settings.Defaults();
@@ -368,7 +407,7 @@ namespace PomodoroSupervisor
         public static int Smoke(string outPath)
         {
             // 用临时数据目录，绝不碰用户的真实配置/统计/告状记录
-            Store.OverrideDir = TempDir("pomodoro-smoke");
+            Store.OverrideDir = TempDir("pomocc-smoke");
 
             StringBuilder sb = new StringBuilder();
             int fail = 0;
@@ -583,14 +622,14 @@ namespace PomodoroSupervisor
         /// <summary>DPI 自检：确认进程是 DPI 感知的、界面按 DPI 缩放、布局没有溢出。</summary>
         public static int DpiCheck(string[] args)
         {
-            string outPath = Path.Combine(Path.GetTempPath(), "pomodoro-dpicheck.log");
+            string outPath = Path.Combine(Path.GetTempPath(), "pomocc-dpicheck.log");
             for (int i = 0; i < args.Length; i++)
             {
                 if (string.Equals(args[i], "--dpicheck", StringComparison.OrdinalIgnoreCase) && i + 1 < args.Length)
                     outPath = args[i + 1];
             }
 
-            Store.OverrideDir = TempDir("pomodoro-dpi");
+            Store.OverrideDir = TempDir("pomocc-dpi");
             StringBuilder sb = new StringBuilder();
             int fail = 0;
             sb.Append("临时数据目录（含 app.log）：").Append(Store.Dir).Append("\r\n");
@@ -821,7 +860,7 @@ namespace PomodoroSupervisor
 
         public static int RealSmoke(string[] args)
         {
-            string outPath = Path.Combine(Path.GetTempPath(), "pomodoro-realsmoke.log");
+            string outPath = Path.Combine(Path.GetTempPath(), "pomocc-realsmoke.log");
             for (int i = 0; i < args.Length; i++)
             {
                 if (string.Equals(args[i], "--realsmoke", StringComparison.OrdinalIgnoreCase) && i + 1 < args.Length)
@@ -831,7 +870,7 @@ namespace PomodoroSupervisor
             StringBuilder sb = new StringBuilder();
             int fail = 0;
 
-            Store.OverrideDir = TempDir("pomodoro-real");
+            Store.OverrideDir = TempDir("pomocc-real");
 
             bool headlessBefore = App.Headless;
             App.Headless = false;
@@ -839,7 +878,7 @@ namespace PomodoroSupervisor
             string realRaw = AutoStart.ReadReal();
 
             // 用测试专用值名做注册表读写验证：真的读写注册表，但不碰用户自己那一项
-            AutoStart.OverrideValueName = "PomodoroSupervisorSelfTest";
+            AutoStart.OverrideValueName = "PomoCCSelfTest";
 
             try
             {
@@ -878,7 +917,7 @@ namespace PomodoroSupervisor
                 Check(sb, "tray-icon-created", trayOk, "托盘图标可以创建并显示", ref fail);
 
                 bool created;
-                using (Mutex m = new Mutex(true, "PomodoroSupervisor.SingleInstance.v1", out created))
+                using (Mutex m = new Mutex(true, App.MutexName, out created))
                 {
                     if (created)
                     {
@@ -909,9 +948,13 @@ namespace PomodoroSupervisor
                 Check(sb, "secret-not-plaintext-on-disk",
                     raw.IndexOf("super-secret-code") < 0, "config.json 中找不到明文授权码", ref fail);
 
-                string realDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "PomodoroSupervisor");
-                sb.Append("[INFO] 用户真实数据目录是否已存在：")
-                  .Append(Directory.Exists(realDir) ? "是" : "否（正常，首次运行才创建）").Append("\r\n");
+                string appdata = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+                string realDir = Path.Combine(appdata, Store.DataFolderName);
+                string legacyDir = Path.Combine(appdata, Store.LegacyDataFolderName);
+                sb.Append("[INFO] 用户真实数据目录：").Append(realDir)
+                  .Append(Directory.Exists(realDir) ? "（已存在）" : "（不存在，首次运行才创建）")
+                  .Append("；旧目录 ").Append(Store.LegacyDataFolderName)
+                  .Append(Directory.Exists(legacyDir) ? "（仍在，说明还没迁移过）" : "（已清理）").Append("\r\n");
             }
             catch (Exception ex)
             {
@@ -938,7 +981,7 @@ namespace PomodoroSupervisor
         /// </summary>
         public static int LoadCheck(string[] args)
         {
-            string outPath = Path.Combine(Path.GetTempPath(), "pomodoro-loadcheck.log");
+            string outPath = Path.Combine(Path.GetTempPath(), "pomocc-loadcheck.log");
             string source = null;
             for (int i = 0; i < args.Length; i++)
             {
@@ -952,7 +995,7 @@ namespace PomodoroSupervisor
             StringBuilder sb = new StringBuilder();
             int fail = 0;
 
-            Store.OverrideDir = TempDir("pomodoro-loadcheck");
+            Store.OverrideDir = TempDir("pomocc-loadcheck");
 
             if (string.IsNullOrEmpty(source) || !File.Exists(source))
             {
@@ -1024,7 +1067,7 @@ namespace PomodoroSupervisor
         /// </summary>
         public static int RenderCheck(string[] args)
         {
-            string outPath = Path.Combine(Path.GetTempPath(), "pomodoro-rendertest.log");
+            string outPath = Path.Combine(Path.GetTempPath(), "pomocc-rendertest.log");
             for (int i = 0; i < args.Length; i++)
             {
                 if (string.Equals(args[i], "--rendertest", StringComparison.OrdinalIgnoreCase) && i + 1 < args.Length)
@@ -1128,7 +1171,7 @@ namespace PomodoroSupervisor
         /// </summary>
         public static int Shot(string[] args)
         {
-            string dir = Path.Combine(Path.GetTempPath(), "pomodoro-shots");
+            string dir = Path.Combine(Path.GetTempPath(), "pomocc-shots");
             for (int i = 0; i < args.Length; i++)
             {
                 if (string.Equals(args[i], "--shot", StringComparison.OrdinalIgnoreCase) && i + 1 < args.Length)
@@ -1140,7 +1183,7 @@ namespace PomodoroSupervisor
 
             try
             {
-                Store.OverrideDir = TempDir("pomodoro-shot");
+                Store.OverrideDir = TempDir("pomocc-shot");
                 Application.EnableVisualStyles();
                 Application.SetCompatibleTextRenderingDefault(false);
                 Directory.CreateDirectory(dir);
@@ -1471,7 +1514,7 @@ namespace PomodoroSupervisor
                 // 把渲染结果存下来，便于用眼睛核对
                 try
                 {
-                    if (btnDir == null) btnDir = TempDir("pomodoro-btn");
+                    if (btnDir == null) btnDir = TempDir("pomocc-btn");
                     string img = Path.Combine(btnDir, tag + ".png");
                     using (Bitmap big = new Bitmap(btn.Width * 6, btn.Height * 6))
                     {
@@ -1706,7 +1749,7 @@ namespace PomodoroSupervisor
 
         public static int SmtpCheck(string[] args)
         {
-            string outPath = Path.Combine(Path.GetTempPath(), "pomodoro-smtp-check.log");
+            string outPath = Path.Combine(Path.GetTempPath(), "pomocc-smtp-check.log");
             string host = null;
             int port = 587;
 
@@ -1748,7 +1791,7 @@ namespace PomodoroSupervisor
 
         public static int MailTest(string[] args)
         {
-            string outPath = Path.Combine(Path.GetTempPath(), "pomodoro-mail-test.log");
+            string outPath = Path.Combine(Path.GetTempPath(), "pomocc-mail-test.log");
             string host = "127.0.0.1";
             int port = 2525;
 

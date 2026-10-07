@@ -1,6 +1,6 @@
 using System.Drawing;
 
-namespace PomodoroSupervisor
+namespace PomoCC
 {
     /// <summary>
     /// 统一视觉：配色、字体、圆角。

@@ -117,7 +117,7 @@
   窗口可以自由拉伸，卡片高度会跟着内容自动调整，不会有按钮被挡住。
 
 数据存在哪里
-  C:\Users\<你的用户名>\AppData\Roaming\PomodoroSupervisor\
+  C:\Users\<你的用户名>\AppData\Roaming\PomoCC\
       config.json     设置（授权码和 API Key 都是加密存的）
       history.jsonl   历次告状邮件全文
       stats.json      今日统计

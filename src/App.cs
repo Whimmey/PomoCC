@@ -5,7 +5,7 @@ using System.Threading;
 using System.Windows.Forms;
 using Microsoft.Win32;
 
-namespace PomodoroSupervisor
+namespace PomoCC
 {
     public static class App
     {
@@ -16,6 +16,23 @@ namespace PomodoroSupervisor
         /// <summary>项目主页与作者（设置窗口左下角的署名链接用它）。</summary>
         public const string Author = "Whimmey";
         public const string RepoUrl = "https://github.com/Whimmey/PomoCC";
+
+        /// <summary>单实例互斥体名字。</summary>
+        public const string MutexName = "PomoCC.SingleInstance.v1";
+
+        /// <summary>环境变量开关：新名优先，旧名（POMODORO_*）继续认，避免改名后漏掉开关。</summary>
+        internal static bool EnvFlag(string newName, string oldName)
+        {
+            return Environment.GetEnvironmentVariable(newName) == "1"
+                || Environment.GetEnvironmentVariable(oldName) == "1";
+        }
+
+        /// <summary>环境变量取值：新名优先，旧名兜底。</summary>
+        internal static string EnvValue(string newName, string oldName)
+        {
+            string v = Environment.GetEnvironmentVariable(newName);
+            return string.IsNullOrEmpty(v) ? Environment.GetEnvironmentVariable(oldName) : v;
+        }
 
         /// <summary>自检/冒烟测试模式：不弹窗、不发邮件、不写注册表。</summary>
         public static bool Headless;
@@ -41,7 +58,15 @@ namespace PomodoroSupervisor
     public static class AutoStart
     {
         private const string RunKey = @"Software\Microsoft\Windows\CurrentVersion\Run";
-        private const string ValueName = "PomodoroSupervisor";
+
+        /// <summary>注册表里的值名。</summary>
+        internal const string MainValueName = "PomoCC";
+
+        /// <summary>
+        /// 老版本用的值名。改名后必须顺手删掉它 ——
+        /// 否则两条自启项同时存在，开机启动两次（第二次还会弹"已经在运行"）。
+        /// </summary>
+        internal const string LegacyValueName = "PomodoroSupervisor";
 
         /// <summary>
         /// 自检用：把注册表值名换成测试专用名。
@@ -52,7 +77,7 @@ namespace PomodoroSupervisor
 
         private static string Name
         {
-            get { return string.IsNullOrEmpty(OverrideValueName) ? ValueName : OverrideValueName; }
+            get { return string.IsNullOrEmpty(OverrideValueName) ? MainValueName : OverrideValueName; }
         }
 
         public static bool IsEnabled()
@@ -85,7 +110,7 @@ namespace PomodoroSupervisor
         {
             // Headless（自检）不写注册表；截图自检用 POMODORO_NO_REGISTRY=1 再兜一层。
             if (App.Headless) return false;
-            if (Environment.GetEnvironmentVariable("POMODORO_NO_REGISTRY") == "1") return false;
+            if (App.EnvFlag("POMOCC_NO_REGISTRY", "POMODORO_NO_REGISTRY")) return false;
             try
             {
                 string want = enabled ? "\"" + App.ExePath + "\" --tray" : null;
@@ -100,6 +125,7 @@ namespace PomodoroSupervisor
                         k.DeleteValue(Name, false);
                     }
                     Store.Log("已取消开机自启");
+                    RemoveLegacyValue();
                     return true;
                 }
 
@@ -110,6 +136,7 @@ namespace PomodoroSupervisor
                     if (k == null) return false;
                     k.SetValue(Name, want);
                 }
+                RemoveLegacyValue();
                 Store.Log("开机自启已设置为：开");
                 return true;
             }
@@ -120,6 +147,24 @@ namespace PomodoroSupervisor
             }
         }
 
+        /// <summary>
+        /// 清掉老值名（PomodoroSupervisor）遗留的自启项。
+        /// 自检用测试值名时**绝不碰**真实项，所以这里先判断 OverrideValueName。
+        /// </summary>
+        private static void RemoveLegacyValue()
+        {
+            if (!string.IsNullOrEmpty(OverrideValueName)) return;
+            if (ReadRaw(LegacyValueName) == null) return;
+            try
+            {
+                using (RegistryKey k = Registry.CurrentUser.OpenSubKey(RunKey, true))
+                {
+                    if (k != null) k.DeleteValue(LegacyValueName, false);
+                }
+                Store.Log("已清理旧版遗留的开机自启项（" + LegacyValueName + "）");
+            }
+            catch { }
+        }
         /// <summary>自检收尾用：清掉测试专用项。</summary>
         internal static void RemoveTestValue()
         {
@@ -137,7 +182,7 @@ namespace PomodoroSupervisor
         /// <summary>读用户真实项的原样字符串（null = 原本没有这一项）。自检前保存、自检后原样恢复。</summary>
         internal static string ReadReal()
         {
-            return ReadRaw(ValueName);
+            return ReadRaw(MainValueName);
         }
 
         /// <summary>
@@ -149,13 +194,13 @@ namespace PomodoroSupervisor
         {
             try
             {
-                string have = ReadRaw(ValueName);
+                string have = ReadRaw(MainValueName);
                 if (raw == null)
                 {
                     if (have == null) return;
                     using (RegistryKey k = Registry.CurrentUser.OpenSubKey(RunKey, true))
                     {
-                        if (k != null) k.DeleteValue(ValueName, false);
+                        if (k != null) k.DeleteValue(MainValueName, false);
                     }
                     Store.Log("已取消开机自启");
                     return;
@@ -163,7 +208,7 @@ namespace PomodoroSupervisor
                 if (have == raw) return;              // 一模一样就一个字节都不写
                 using (RegistryKey k = Registry.CurrentUser.CreateSubKey(RunKey))
                 {
-                    if (k != null) k.SetValue(ValueName, raw);
+                    if (k != null) k.SetValue(MainValueName, raw);
                 }
             }
             catch { }
@@ -223,7 +268,7 @@ namespace PomodoroSupervisor
                 return SelfTest.Shot(args);
 
             bool created;
-            singleInstance = new Mutex(true, "PomodoroSupervisor.SingleInstance.v1", out created);
+            singleInstance = new Mutex(true, App.MutexName, out created);
             if (!created)
             {
                 MessageBox.Show("「番茄钟监督」已经在运行了（看右下角托盘图标）。", "番茄钟监督",
@@ -232,7 +277,7 @@ namespace PomodoroSupervisor
             }
 
             // 独立数据目录（截图自检用，不影响用户真实配置）
-            string dataDir = Environment.GetEnvironmentVariable("POMODORO_DATA_DIR");
+            string dataDir = App.EnvValue("POMOCC_DATA_DIR", "POMODORO_DATA_DIR");
             if (!string.IsNullOrEmpty(dataDir)) Store.OverrideDir = dataDir;
             App.OpenSettingsOnStart = Has(args, "--opensettings");
             App.EditMinutesOnStart = Has(args, "--editminutes");
@@ -278,7 +323,7 @@ namespace PomodoroSupervisor
                         return args[i + 1];
                 }
             }
-            return Path.Combine(Path.GetTempPath(), "pomodoro-selftest.log");
+            return Path.Combine(Path.GetTempPath(), "pomocc-selftest.log");
         }
     }
 }
