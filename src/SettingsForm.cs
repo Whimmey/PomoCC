@@ -46,8 +46,7 @@ namespace PomoCC
         private NumberBox numFocus, numViolation, numSample;
         private CheckBox chkOnlyAfter, chkAutoStart, chkTray, chkNotify, chkSound;
 
-        // 左下角署名
-        private Label lblCredit;
+        // 底部按钮行上的署名（版本号 + 作者链接）
         private LinkLabel lnkAuthor;
 
         /// <summary>供自检：署名区的版本号与作者链接信息。</summary>
@@ -55,12 +54,12 @@ namespace PomoCC
         {
             get
             {
-                if (lblCredit == null || lnkAuthor == null) return "(没建出来)";
+                if (lnkAuthor == null) return "(没建出来)";
                 string seg = "";
                 try { seg = lnkAuthor.Text.Substring(lnkAuthor.LinkArea.Start, lnkAuthor.LinkArea.Length); }
                 catch { seg = "(取不到)"; }
-                return string.Format("版本「{0}」｜署名「{1}」｜可点区域「{2}」｜目标 {3}",
-                    lblCredit.Text, lnkAuthor.Text, seg, App.RepoUrl);
+                return string.Format("署名「{0}」｜可点区域「{1}」｜目标 {2}",
+                    lnkAuthor.Text, seg, App.RepoUrl);
             }
         }
 
@@ -158,40 +157,6 @@ namespace PomoCC
             navFlow.Controls.Add(navMail);
             navFlow.Controls.Add(navParams);
 
-            // ---------- 左下角署名：版本号 + 作者（点作者打开 GitHub 仓库） ----------
-            // 放这里的理由：任何页都看得见、不占内容区、跟桌面软件的惯例一致。
-            FlowLayoutPanel credit = new FlowLayoutPanel();
-            credit.FlowDirection = FlowDirection.TopDown;
-            credit.WrapContents = false;
-            credit.AutoSize = true;
-            credit.AutoSizeMode = AutoSizeMode.GrowAndShrink;
-            credit.Dock = DockStyle.Bottom;
-            credit.BackColor = Theme.Card;
-            credit.Margin = new Padding(0);
-            credit.Padding = new Padding(6, 8, 0, 0);
-            nav.Controls.Add(credit);
-
-            lblCredit = new Label();
-            lblCredit.Text = "PomoCC " + App.Version;
-            lblCredit.Font = Theme.BodySmall;
-            lblCredit.ForeColor = Theme.SubText;
-            lblCredit.AutoSize = true;
-            lblCredit.Margin = new Padding(0, 0, 0, 2);
-            credit.Controls.Add(lblCredit);
-
-            lnkAuthor = new LinkLabel();
-            lnkAuthor.Text = "作者 " + App.Author;        // 只有 Whimmey 那一段是链接
-            lnkAuthor.Font = Theme.BodySmall;
-            lnkAuthor.ForeColor = Theme.SubText;
-            lnkAuthor.LinkColor = Theme.Link;
-            lnkAuthor.ActiveLinkColor = Theme.LinkActive;
-            lnkAuthor.VisitedLinkColor = Theme.Link;       // 点过也保持蓝色
-            lnkAuthor.LinkBehavior = LinkBehavior.AlwaysUnderline;
-            lnkAuthor.AutoSize = true;
-            lnkAuthor.Margin = new Padding(0);
-            lnkAuthor.LinkArea = new LinkArea(3, App.Author.Length);
-            lnkAuthor.LinkClicked += delegate { OpenUrl(App.RepoUrl); };
-            credit.Controls.Add(lnkAuthor);
 
             pageHost = new Panel();
             pageHost.Dock = DockStyle.Fill;
@@ -466,11 +431,12 @@ namespace PomoCC
 
             TableLayoutPanel bar = new TableLayoutPanel();
             bar.Dock = DockStyle.Fill;
-            bar.ColumnCount = 2;
+            bar.ColumnCount = 3;
             bar.RowCount = 1;
             bar.BackColor = Theme.Bg;
-            bar.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
-            bar.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+            bar.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));   // 左：保存状态
+            bar.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));        // 中：版本号 + 作者
+            bar.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));        // 右：按钮
             bottom.Controls.Add(bar);
 
             lblSaveState = new Label();
@@ -482,9 +448,26 @@ namespace PomoCC
             lblSaveState.Text = "";
             bar.Controls.Add(lblSaveState, 0, 0);
 
+            // 版本号 + 作者链接（作者名可点，打开 GitHub 仓库）
+            string creditText = "PomoCC " + App.Version + " · 作者 " + App.Author;
+            lnkAuthor = new LinkLabel();
+            lnkAuthor.Text = creditText;
+            lnkAuthor.Font = Theme.BodySmall;
+            lnkAuthor.ForeColor = Theme.SubText;
+            lnkAuthor.LinkColor = Theme.Link;
+            lnkAuthor.ActiveLinkColor = Theme.LinkActive;
+            lnkAuthor.VisitedLinkColor = Theme.Link;          // 点过也保持蓝色
+            lnkAuthor.LinkBehavior = LinkBehavior.AlwaysUnderline;
+            lnkAuthor.AutoSize = true;
+            lnkAuthor.Anchor = AnchorStyles.Right;            // 靠右、垂直居中
+            lnkAuthor.Margin = new Padding(0, 0, 18, 0);      // 与按钮留出间距
+            lnkAuthor.LinkArea = new LinkArea(creditText.IndexOf(App.Author), App.Author.Length);
+            lnkAuthor.LinkClicked += delegate { OpenUrl(App.RepoUrl); };
+            bar.Controls.Add(lnkAuthor, 1, 0);
+
             FlowLayoutPanel rightButtons = Ui.RightButtonRow(save, close);
             rightButtons.Dock = DockStyle.Fill;
-            bar.Controls.Add(rightButtons, 1, 0);
+            bar.Controls.Add(rightButtons, 2, 0);
 
             CancelButton = close;
 
