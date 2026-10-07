@@ -5,7 +5,7 @@
 
 一个单文件 Windows 桌面小程序：番茄钟 + 监督程序进程监测 + 自动给监督人发告状邮件。
 
-- 当前版本：**0.1**（`App.Version` + `src/AssemblyInfo.cs` + README 的版本号；**产物文件名固定不带版本**，版本信息在 exe 属性里）
+- 当前版本：**0.2**（`App.Version` + `src/AssemblyInfo.cs` + README 的版本号；**产物文件名固定不带版本**，版本信息在 exe 属性里）
 - 交付物：[dist/PomoCC-番茄钟监督.exe](dist/PomoCC-番茄钟监督.exe)（约 150 KB）+ [dist/PomoCC-番茄钟监督.exe.config](dist/PomoCC-番茄钟监督.exe.config)
 - 用户文档：[docs/使用说明.txt](docs/使用说明.txt)（构建时自动复制进 `dist/`）
 - 开源协议：Apache-2.0（[LICENSE](LICENSE)）
@@ -54,7 +54,8 @@ PomodoroSupervisor/
 │  ├─ Store.cs               数据目录、设置/统计/告状记录持久化、日志、旧配置迁移
 │  ├─ Monitor.cs             按规则枚举受监视进程 + 启动时间 + 命中的规则
 │  ├─ AppCatalog.cs          枚举本机正在运行的程序（图标/描述/窗口标题）
-│  ├─ Supervisor.cs          专注状态机、采样累积、逐条规则判定（核心逻辑，与界面解耦）
+│  ├─ Supervisor.cs          专注状态机（后台线程 + 单调时钟）、逐实例采样、逐条规则判定
+│  ├─ AsyncMail.cs           手动发信（连接测试/测试发信/重发）的异步外壳
 │  ├─ Mailer.cs              邮件主题/正文生成、发送分发
 │  ├─ SmtpTransport.cs       自带 SMTP 客户端（465 隐式 SSL / 587 STARTTLS）
 │  ├─ HttpSender.cs          Resend / SendGrid / Brevo / 自定义 HTTP 四种通道
@@ -65,9 +66,11 @@ PomodoroSupervisor/
 │  ├─ app.manifest           DPI 感知声明（PerMonitorV2）
 │  ├─ app.config             刻意留空，仅用于覆盖旧版 exe.config（见下文）
 │  └─ SelfTest.cs            自检 / 界面冒烟 / 真实模式 / DPI / 配置兼容 / 发信测试
+├─ CHANGELOG.md              版本更新说明
 ├─ tools/fake-smtp.mjs       端到端测试用的假 SMTP 服务器（Node）
 ├─ docs/
 │  ├─ 使用说明.txt            面向最终用户的说明（构建时复制到 dist/）
+│  ├─ 开发修复任务.md         0.2 那一轮的任务清单（历史记录，留档）
 │  └─ images/                README 顶部那张主界面截图（入库，别被 .gitignore 掉）
 ├─ tests/                    自检输出（日志/截图），**不入库**，只留 .gitkeep
 └─ dist/                     构建产物，**不入库**（发布走 GitHub Releases）
@@ -98,7 +101,7 @@ pwsh -File .\build.ps1
 `build.ps1` 保持纯 ASCII：Windows PowerShell 会把无 BOM 的脚本按 ANSI 解码，
 脚本里直接写中文会导致乱码和语法错误。中文产物名从 `exe-name.txt` 用
 `Get-Content -Encoding UTF8` 读取；名字里的 `%VERSION%` 会被替换成
-`src/AssemblyInfo.cs` 里 `AssemblyVersion` 的前三段（当前 `0.1.0`）。
+`src/AssemblyInfo.cs` 里 `AssemblyVersion` 的前三段（当前 `0.2.0`）。
 **发版只要改 AssemblyInfo + App.Version + README 的版本号**，产物名自动跟上。
 （当前 `exe-name.txt` 里**故意没有**用 `%VERSION%`：文件名固定成 `PomoCC-番茄钟监督.exe`，
 这样注册表里的开机自启路径跨版本始终有效，不用每次发版都去改它。版本信息在 exe 属性里。）
@@ -311,6 +314,25 @@ node .\tools\fake-smtp.mjs 2560 .\tests\e2e-message.txt .\tests\e2e-session.txt 
 - `--shot`：把每个窗口渲染成 PNG，我逐张看过再交付；
 - `--rendertest`：把按钮/整窗渲染到位图后数像素（背景是否擦净、有没有未绘制区域、文字有没有被截断）。
 
+## 0.2 监督核心的验收测试（改这些代码前先看）
+
+任务清单在 `docs/开发修复任务.md`，对应断言（全部在 `SelfTest.cs`，都用临时目录/假时钟/假进程表，可重复跑）：
+
+| 断言 | 保证什么 |
+|---|---|
+| `ui-blocked-timer-keeps-running` | 主线程阻塞 3 秒，后台仍计时（界面卡顿不少算） |
+| `sleep-gap-not-counted` / `power-suspend-not-counted` | 睡眠、Suspend 期间的时间不计入专注 |
+| `multi-instance-counted-once` | 同一 exe 多实例不会重复累加规则预算 |
+| `restart-creates-new-instance` | 同 PID 换启动时间 = 新实例，累计时间仍连续 |
+| `violated-then-complete-keeps-violated` / `violated-then-abandon-no-second-mail` | 违规后不重复发信、不变成"正常完成" |
+| `session-uses-config-snapshot` | 会话中途改设置不影响本段 |
+| `http-url-policy` / `smtp-address-crlf-rejected` | 发信地址边界（明文 http 只允许本机、拒绝换行注入） |
+| `async-send-nonblocking` / `async-send-drops-result-after-close` | 手动发信不卡界面、窗口关掉后丢弃迟到结果 |
+| `migration-retry-after-failure` / `history-concurrent-writes` | 迁移可重试、历史并发写入不交错 |
+
+自检注入点：`Supervisor.Clock`（换假时钟）、`Supervisor.ProcessScan`（喂假进程表）、
+`Supervisor.ManualTickOnly`（不让后台线程推进）、`Store.RoamingRootOverride`（把 %APPDATA% 指到临时目录）。
+
 ## 关键实现细节
 
 - **改名（0.1 起）**：数据目录、注册表值名、互斥体、HTTP User-Agent、邮件 X-Mailer 全部叫 `PomoCC`，
@@ -322,11 +344,16 @@ node .\tools\fake-smtp.mjs 2560 .\tests\e2e-message.txt .\tests\e2e-session.txt 
   环境变量同时认新名与旧名（`POMOCC_*` 优先，`POMODORO_*` 兜底），防止改名后漏掉开关。
 - **规则表**：每条 `WatchRule` = 进程名 + 程序自报名 + 用户名称 + 路径 + 规则时长 + 是否启用。
   旧版配置里的「一串进程名」会在加载时自动迁移（时长沿用旧的全局值）。
-- **偷玩时长按采样累加**：每 `SampleSeconds`（默认 5 秒）枚举一次命中规则的进程，
-  **按每条规则各自的时长**判定，符合表格逐行配置的语义。
-- **睡眠不算专注**：每秒 tick 检测实际间隔，超过 15 秒视为睡眠/挂起，该段不计入专注时长。
-- **一段专注最多一封邮件**：`FocusSession.Reported` 保证「超时」告状后，即使随后点「放弃」也不重复发信。
-- **专注走完的提醒**：`Supervisor.Complete()` → `NotifyComplete()`：托盘气泡（走 `Notify` 事件）+ `SystemSounds.Asterisk`。
+- **计时与采样都在后台**：`Supervisor.StartLoop()` 起一个后台线程，每 200ms `Tick()` 一次；
+  流逝时间用单调时钟（`Clock`，正式是 `StopwatchClock`，自检可换 `FakeClock`）算，**跟 UI 定时器无关**。
+  超过 `SleepGapSeconds`(15s) 的间隔视为睡眠，不计入；另外接 `SystemEvents.PowerModeChanged`，
+  Suspend 时复位基准、Resume 时再复位一次（双保险）。界面只调 `Read()` 拿只读快照。
+- **偷玩时长按实例采样、按 exe 汇总**：实例身份 = `Exe + PID + 启动时间`（`WatchProcess.Instances`）；
+  同一轮采样里同一个 exe **只给规则预算累加一次**（同时开多个实例不会双倍消耗额度），
+  各实例的 `Seconds` 只用于显示；规则仍按 exe 汇总判定，符合表格逐行配置的语义。
+- **结果状态明确**：`SessionResult.Running/Completed/Abandoned/Violated` + 独立的 `ReportTriggered`。
+  违规后走到结束仍是 `Violated`：不重复发信、不记成正常完成、也不触发完成提醒。
+- **专注走完的提醒**：`Supervisor.FinishLocked(true)` → `NotifyComplete()`：托盘气泡（走 `Notify` 事件）+ `SystemSounds.Asterisk`。
   两个开关 `Settings.NotifyOnComplete` / `NotifySound` 默认开，可在「规则与其他」页关掉。
   配置 **v1 → v2** 迁移要注意：老配置里没有这两个 bool 字段，反序列化后是 false（等于关），
   `Store.Normalize` 里按 `Version < 2` 显式补成 true，否则老用户升级后提醒会**静默失效**。

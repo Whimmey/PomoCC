@@ -73,34 +73,63 @@ namespace PomoCC
         }
 
         /// <summary>
-        /// 数据目录改名：%APPDATA%\PomodoroSupervisor → %APPDATA%\PomoCC。
-        /// 第一次运行时把老目录里的文件搬过来（配置/统计/记录/日志），确认能读出来之后删掉老目录 ——
-        /// 不搬的话用户会以为"设置、密码、授权码全丢了"，不删的话机器上会多留一个空目录。
+        /// 迁移完成标记。**只有**标记存在才算迁移结束：
+        /// 中途失败（某个文件复制不了、配置读不出来）就不写标记，下次启动继续重试，
+        /// 不会因为"新目录里已经有 config.json"而永久跳过剩下的文件。
         /// </summary>
-        private static void MigrateLegacyData(string newDir)
+        internal const string MigrateMarkerName = "migrated.json";
+
+        /// <summary>
+        /// 数据目录改名：%APPDATA%\PomodoroSupervisor → %APPDATA%\PomoCC。
+        /// 步骤：复制（不覆盖新目录里已有的文件）→ 验证新配置能反序列化 → 写标记 → 删旧目录。
+        /// 任何一步失败都不写标记，下次启动继续；旧目录只在全部成功后才删。
+        /// </summary>
+        internal static void MigrateLegacyData(string newDir)
         {
             try
             {
-                string newCfg = Path.Combine(newDir, ConfigFileName);
-                if (File.Exists(newCfg)) return;                  // 新目录已有配置：绝不覆盖
+                string marker = Path.Combine(newDir, MigrateMarkerName);
+                if (File.Exists(marker)) return;                        // 已经迁移过
+
                 string oldDir = Path.Combine(RoamingRoot, LegacyDataFolderName);
-                if (!Directory.Exists(oldDir)) return;
-                if (!File.Exists(Path.Combine(oldDir, ConfigFileName))) return;   // 老目录没配置，没什么可搬
+                if (!Directory.Exists(oldDir))
+                {
+                    WriteMigrateMarker(marker, "没有旧目录，无需迁移");
+                    return;
+                }
+                if (!File.Exists(Path.Combine(oldDir, ConfigFileName)))
+                {
+                    WriteMigrateMarker(marker, "旧目录里没有配置，无需迁移");
+                    return;
+                }
 
                 string[] files = { ConfigFileName, "stats.json", "history.jsonl", "app.log" };
+                int copied = 0;
                 for (int i = 0; i < files.Length; i++)
                 {
                     string src = Path.Combine(oldDir, files[i]);
-                    if (File.Exists(src)) File.Copy(src, Path.Combine(newDir, files[i]), true);
+                    string dst = Path.Combine(newDir, files[i]);
+                    if (!File.Exists(src)) continue;
+                    if (File.Exists(dst)) continue;                     // 新目录已有这个文件：绝不覆盖
+                    File.Copy(src, dst, false);                         // 失败会抛 → 不写标记 → 下次重试
+                    copied++;
                 }
 
-                // 确认新配置真的读得出来，再删老目录
-                string text = File.ReadAllText(newCfg, Encoding.UTF8);
-                if (text.Trim().Length == 0) return;
-                try { Directory.Delete(oldDir, true); }
-                catch { return; }                                 // 删不掉就留着，至少数据已经搬过来了
+                // 复制完再验证配置真的能反序列化（读不出来就不算迁移成功）
+                string cfg = Path.Combine(newDir, ConfigFileName);
+                if (File.Exists(cfg))
+                {
+                    string text = File.ReadAllText(cfg, Encoding.UTF8);
+                    if (text.Trim().Length == 0) return;
+                    Settings probe = Ser.Deserialize<Settings>(text);
+                    if (probe == null) return;
+                }
 
-                // 注意：这里不能调 Log() —— Log 会走 LogPath → Dir → 重新进入本方法。直接写文件。
+                WriteMigrateMarker(marker, string.Format("从 {0} 迁移了 {1} 个文件", LegacyDataFolderName, copied));
+                try { Directory.Delete(oldDir, true); }                 // 确认新目录可用后才删旧目录
+                catch { }                                              // 删不掉也没关系，数据已经安全了
+
+                // 不能调 Log()：Log → LogPath → Dir → 又回到本方法。直接写文件。
                 try
                 {
                     File.AppendAllText(Path.Combine(newDir, "app.log"),
@@ -108,6 +137,20 @@ namespace PomoCC
                             DateTime.Now, LegacyDataFolderName, DataFolderName), Encoding.UTF8);
                 }
                 catch { }
+            }
+            catch
+            {
+                // 迁移失败：不写标记，下次启动继续（不要在这里删旧目录）
+            }
+        }
+
+        private static void WriteMigrateMarker(string marker, string note)
+        {
+            try
+            {
+                File.WriteAllText(marker,
+                    "{\"migratedAt\":\"" + DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss") + "\",\"note\":\"" + note + "\"}\r\n",
+                    Encoding.UTF8);
             }
             catch { }
         }
@@ -272,15 +315,21 @@ namespace PomoCC
 
         // ---------- 告状记录 ----------
 
+        /// <summary>进程内写锁：多个后台发送线程同时写 JSONL 时不能交错。</summary>
+        private static readonly object historyLock = new object();
+
         public static void AppendHistory(HistoryEntry e)
         {
-            try
+            lock (historyLock)
             {
-                File.AppendAllText(HistoryPath, Ser.Serialize(e) + "\r\n", Encoding.UTF8);
-            }
-            catch (Exception ex)
-            {
-                Log("写入告状记录失败：" + ex.Message);
+                try
+                {
+                    File.AppendAllText(HistoryPath, Ser.Serialize(e) + "\r\n", Encoding.UTF8);
+                }
+                catch (Exception ex)
+                {
+                    Log("写入告状记录失败：" + ex.Message);
+                }
             }
         }
 
@@ -291,6 +340,7 @@ namespace PomoCC
             {
                 if (!File.Exists(HistoryPath)) return list;
                 string[] lines = File.ReadAllLines(HistoryPath, Encoding.UTF8);
+                int skipped = 0;
                 for (int i = lines.Length - 1; i >= 0 && list.Count < max; i--)
                 {
                     string line = lines[i].Trim();
@@ -299,9 +349,11 @@ namespace PomoCC
                     {
                         HistoryEntry e = Ser.Deserialize<HistoryEntry>(line);
                         if (e != null) list.Add(e);
+                        else skipped++;
                     }
-                    catch { }
+                    catch { skipped++; }
                 }
+                if (skipped > 0) Log(string.Format("读取告状记录时跳过了 {0} 行损坏内容", skipped));
             }
             catch (Exception ex)
             {

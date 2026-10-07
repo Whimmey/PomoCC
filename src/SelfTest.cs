@@ -42,6 +42,19 @@ namespace PomoCC
             }
         }
 
+        /// <summary>自检辅助：构造一个"扫描到的进程"。</summary>
+        private static WatchProcess Proc(string exe, int pid, DateTime start, int limit)
+        {
+            WatchProcess w = new WatchProcess();
+            w.Exe = exe;
+            w.DisplayName = System.IO.Path.GetFileNameWithoutExtension(exe);
+            w.Name = "";
+            w.Pid = pid;
+            w.StartTime = start;
+            w.LimitMinutes = limit;
+            return w;
+        }
+
         private static WatchRule Rule(string exe, int limitMinutes)
         {
             WatchRule r = new WatchRule();
@@ -303,6 +316,387 @@ namespace PomoCC
                     string.Format("v1 配置加载后：气泡={0}、提示音={1}、Version={2}",
                         migratedCfg.NotifyOnComplete, migratedCfg.NotifySound, migratedCfg.Version), ref fail);
 
+                // ============================================================
+                //  13f. 监督核心：后台计时 / 睡眠 / 实例识别 / 结果状态
+                // ============================================================
+
+                // (1) 结果状态机：正常走完 = Completed，中途放弃 = Abandoned
+                Settings st1 = Settings.Defaults();
+                st1.FocusMinutes = 1;
+                st1.Rules = new List<WatchRule>();
+                Supervisor sm1 = new Supervisor(st1, DailyStats.NewFor(DateTime.Now));
+                sm1.ManualTickOnly = true;
+                sm1.StartFocus();
+                bool runningState = sm1.Session != null && sm1.Session.Result == SessionResult.Running;
+                sm1.Complete();
+                Check(sb, "state-machine-completed",
+                    runningState && sm1.Session == null && sm1.Stats.CompletedCount == 1,
+                    "开始=Running，走完=Completed，完成计数 +1", ref fail);
+
+                Settings st2 = Settings.Defaults();
+                st2.FocusMinutes = 1;
+                st2.Rules = new List<WatchRule>();
+                Supervisor sm2 = new Supervisor(st2, DailyStats.NewFor(DateTime.Now));
+                sm2.ManualTickOnly = true;
+                sm2.StartFocus();
+                sm2.Abandon();
+                Check(sb, "state-machine-abandoned",
+                    sm2.Stats.AbandonedCount == 1 && sm2.Stats.ReportCount == 1,
+                    string.Format("放弃：放弃计数 +1、告状 {0} 次", sm2.Stats.ReportCount), ref fail);
+
+                // (2) 阻塞界面不影响计时：后台线程用单调时钟推进
+                Settings st3 = Settings.Defaults();
+                st3.FocusMinutes = 5;
+                st3.Rules = new List<WatchRule>();
+                st3.SampleSeconds = 30;
+                Supervisor sm3 = new Supervisor(st3, DailyStats.NewFor(DateTime.Now));
+                sm3.StartFocus();
+                Thread.Sleep(3200);                       // 模拟界面/主线程被卡住
+                int blockedElapsed = sm3.ElapsedSeconds;
+                bool stillFocusing = sm3.IsFocusing;
+                sm3.StopLoop();
+                sm3.Abandon();
+                Check(sb, "ui-blocked-timer-keeps-running",
+                    stillFocusing && blockedElapsed >= 2 && blockedElapsed <= 8,
+                    string.Format("主线程阻塞 3.2 秒期间，后台仍计时到 {0} 秒（没有停）", blockedElapsed), ref fail);
+
+                // (3) 睡眠/挂起不计入专注（假时钟推进 120 秒）
+                FakeClock fc = new FakeClock();
+                Settings st4 = Settings.Defaults();
+                st4.FocusMinutes = 60;
+                st4.Rules = new List<WatchRule>();
+                st4.SampleSeconds = 5;
+                Supervisor sm4 = new Supervisor(st4, DailyStats.NewFor(DateTime.Now));
+                sm4.ManualTickOnly = true;
+                sm4.Clock = fc;
+                sm4.StartFocus();
+                for (int i = 0; i < 5; i++) { fc.Advance(1); sm4.Tick(); }     // 正常走 5 秒
+                int beforeSleep = sm4.ElapsedSeconds;
+                fc.Advance(120);                                             // 睡了两分钟
+                sm4.Tick();
+                int afterSleep = sm4.ElapsedSeconds;
+                bool sleepLogged = false;
+                if (sm4.Session != null)
+                    for (int i = 0; i < sm4.Session.Events.Count; i++)
+                        if (sm4.Session.Events[i].IndexOf("中断") >= 0) sleepLogged = true;
+                sm4.Abandon();
+                Check(sb, "sleep-gap-not-counted",
+                    beforeSleep == 5 && afterSleep == beforeSleep && sleepLogged,
+                    string.Format("正常 5 秒后睡 120 秒：专注时间仍为 {0} 秒（未把睡眠算进去），且日志记录了中断", afterSleep), ref fail);
+
+                // (4) 电源事件（Suspend/Resume）同样不计入
+                FakeClock fc2 = new FakeClock();
+                Settings st5 = Settings.Defaults();
+                st5.FocusMinutes = 60;
+                st5.Rules = new List<WatchRule>();
+                st5.SampleSeconds = 5;
+                Supervisor sm5 = new Supervisor(st5, DailyStats.NewFor(DateTime.Now));
+                sm5.ManualTickOnly = true;
+                sm5.Clock = fc2;
+                sm5.StartFocus();
+                for (int i = 0; i < 4; i++) { fc2.Advance(1); sm5.Tick(); }
+                int beforeSuspend = sm5.ElapsedSeconds;
+                sm5.OnSystemSuspend();
+                fc2.Advance(300);
+                sm5.OnSystemResume();
+                sm5.Tick();
+                int afterResume = sm5.ElapsedSeconds;
+                sm5.Abandon();
+                Check(sb, "power-suspend-not-counted",
+                    beforeSuspend == 4 && afterResume <= beforeSuspend + 1,
+                    string.Format("Suspend 期间推进 300 秒，专注时间 {0} → {1} 秒", beforeSuspend, afterResume), ref fail);
+
+                // (5) 同一个 exe 多实例：每次采样每个实例只累计一次
+                FakeClock fc3 = new FakeClock();
+                Settings st6 = Settings.Defaults();
+                st6.FocusMinutes = 60;
+                st6.SampleSeconds = 5;
+                WatchRule gr = new WatchRule();
+                gr.Exe = "game.exe";
+                gr.Name = "奶龙";
+                gr.LimitMinutes = 30;
+                gr.Enabled = true;
+                st6.Rules = new List<WatchRule>();
+                st6.Rules.Add(gr);
+                Supervisor sm6 = new Supervisor(st6, DailyStats.NewFor(DateTime.Now));
+                sm6.ManualTickOnly = true;
+                sm6.Clock = fc3;
+                DateTime baseTime = new DateTime(2026, 1, 1, 8, 0, 0);
+                List<WatchProcess> feed = new List<WatchProcess>();
+                sm6.ProcessScan = delegate(List<WatchRule> rules) { return feed; };
+                feed.Add(Proc("game.exe", 100, baseTime, 30));
+                feed.Add(Proc("game.exe", 101, baseTime, 30));
+                sm6.StartFocus();
+                fc3.Advance(5); sm6.Tick();                 // 第 1 次采样：两个实例各 +5
+                fc3.Advance(5); sm6.Tick();                 // 第 2 次采样
+                int multiSeconds = 0, multiInstances = 0;
+                if (sm6.Session != null && sm6.Session.Watched.ContainsKey("game.exe"))
+                {
+                    multiSeconds = sm6.Session.Watched["game.exe"].SessionSeconds;
+                    multiInstances = sm6.Session.Watched["game.exe"].InstanceCount;
+                }
+                sm6.Abandon();
+                Check(sb, "multi-instance-counted-once",
+                    multiSeconds == 10 && multiInstances == 2,
+                    string.Format("两个实例各采样 2 次：exe 汇总 {0} 秒（不重复累加），实例数 {1}", multiSeconds, multiInstances), ref fail);
+
+                // (6) 退出后重启：汇总连续，但算成新实例
+                FakeClock fc4 = new FakeClock();
+                Settings st7 = Settings.Defaults();
+                st7.FocusMinutes = 60;
+                st7.SampleSeconds = 5;
+                st7.Rules = new List<WatchRule>();
+                WatchRule gr2 = new WatchRule();
+                gr2.Exe = "game.exe"; gr2.Name = "奶龙"; gr2.LimitMinutes = 30; gr2.Enabled = true;
+                st7.Rules.Add(gr2);
+                Supervisor sm7 = new Supervisor(st7, DailyStats.NewFor(DateTime.Now));
+                sm7.ManualTickOnly = true;
+                sm7.Clock = fc4;
+                List<WatchProcess> feed2 = new List<WatchProcess>();
+                sm7.ProcessScan = delegate(List<WatchRule> rules) { return feed2; };
+                feed2.Add(Proc("game.exe", 100, baseTime, 30));
+                sm7.StartFocus();
+                fc4.Advance(5); sm7.Tick();
+                feed2.Clear();
+                fc4.Advance(5); sm7.Tick();                                   // 这一轮没看到进程
+                feed2.Add(Proc("game.exe", 100, baseTime.AddMinutes(10), 30)); // 同 PID，但启动时间不同 = 新实例
+                fc4.Advance(5); sm7.Tick();
+                int restartSeconds = 0, restartInstances = 0;
+                if (sm7.Session != null && sm7.Session.Watched.ContainsKey("game.exe"))
+                {
+                    restartSeconds = sm7.Session.Watched["game.exe"].SessionSeconds;
+                    restartInstances = sm7.Session.Watched["game.exe"].InstanceCount;
+                }
+                sm7.Abandon();
+                Check(sb, "restart-creates-new-instance",
+                    restartSeconds == 10 && restartInstances == 2,
+                    string.Format("同 PID 换了启动时间：汇总 {0} 秒（连续），实例数 {1}（识别为新实例）", restartSeconds, restartInstances), ref fail);
+
+                // (7) 违规后走完：仍是 Violated，不重复发信、不记成"正常完成"
+                int beforeNotice = Supervisor.CompleteNoticeCount;
+                FakeClock fc5 = new FakeClock();
+                Settings st8 = Settings.Defaults();
+                st8.FocusMinutes = 2;                   // 目标 120 秒
+                st8.SampleSeconds = 5;
+                st8.Rules = new List<WatchRule>();
+                WatchRule gr3 = new WatchRule();
+                gr3.Exe = "game.exe"; gr3.Name = "奶龙"; gr3.LimitMinutes = 1; gr3.Enabled = true;
+                st8.Rules.Add(gr3);
+                Supervisor sm8 = new Supervisor(st8, DailyStats.NewFor(DateTime.Now));
+                sm8.ManualTickOnly = true;
+                sm8.Clock = fc5;
+                List<WatchProcess> feed3 = new List<WatchProcess>();
+                sm8.ProcessScan = delegate(List<WatchRule> rules) { return feed3; };
+                sm8.StartFocus();
+                for (int i = 0; i < 13; i++)            // 65 秒 > 规则 1 分钟 → 违规
+                {
+                    feed3.Clear();
+                    feed3.Add(Proc("game.exe", 200, baseTime, 1));
+                    fc5.Advance(5);
+                    sm8.Tick();
+                }
+                int mailsAfterViolation = sm8.Stats.ReportCount;
+                SessionResult resAfterViolation = sm8.Session == null ? SessionResult.Completed : sm8.Session.Result;
+                for (int i = 0; i < 12; i++)            // 继续走到 120 秒（到点）
+                {
+                    feed3.Clear();
+                    fc5.Advance(5);
+                    sm8.Tick();
+                }
+                bool finishedViolated = sm8.Session == null;
+                Check(sb, "violated-then-complete-keeps-violated",
+                    resAfterViolation == SessionResult.Violated && finishedViolated
+                    && sm8.Stats.ReportCount == 1 && sm8.Stats.CompletedCount == 0
+                    && Supervisor.CompleteNoticeCount == beforeNotice,
+                    string.Format("违规时结果={0}、告状 {1} 次；走完目标后：完成计数 {2}（不能记成正常完成）、完成提醒 {3}（不应触发）",
+                        resAfterViolation, mailsAfterViolation, sm8.Stats.CompletedCount,
+                        Supervisor.CompleteNoticeCount - beforeNotice), ref fail);
+
+                // (8) 违规后放弃：不重复发信
+                FakeClock fc6 = new FakeClock();
+                Settings st9 = Settings.Defaults();
+                st9.FocusMinutes = 60;
+                st9.SampleSeconds = 5;
+                st9.Rules = new List<WatchRule>();
+                WatchRule gr4 = new WatchRule();
+                gr4.Exe = "game.exe"; gr4.Name = "奶龙"; gr4.LimitMinutes = 1; gr4.Enabled = true;
+                st9.Rules.Add(gr4);
+                Supervisor sm9 = new Supervisor(st9, DailyStats.NewFor(DateTime.Now));
+                sm9.ManualTickOnly = true;
+                sm9.Clock = fc6;
+                List<WatchProcess> feed4 = new List<WatchProcess>();
+                sm9.ProcessScan = delegate(List<WatchRule> rules) { return feed4; };
+                sm9.StartFocus();
+                for (int i = 0; i < 13; i++)
+                {
+                    feed4.Clear();
+                    feed4.Add(Proc("game.exe", 300, baseTime, 1));
+                    fc6.Advance(5);
+                    sm9.Tick();
+                }
+                sm9.Abandon();
+                Check(sb, "violated-then-abandon-no-second-mail",
+                    sm9.Stats.ReportCount == 1 && sm9.Stats.AbandonedCount == 0,
+                    string.Format("违规后放弃：告状仍为 {0} 次、放弃计数 {1}（不重复发信、不算普通放弃）",
+                        sm9.Stats.ReportCount, sm9.Stats.AbandonedCount), ref fail);
+
+                // (9) 会话使用固定的配置快照
+                Settings st10 = Settings.Defaults();
+                st10.FocusMinutes = 1;
+                st10.Rules = new List<WatchRule>();
+                Supervisor sm10 = new Supervisor(st10, DailyStats.NewFor(DateTime.Now));
+                sm10.ManualTickOnly = true;
+                sm10.StartFocus();
+                int snapPlanned = sm10.Session.PlannedSeconds;
+                sm10.Settings.FocusMinutes = 9;          // 会话中途改设置
+                int snapPlannedAfter = sm10.Session.PlannedSeconds;
+                sm10.Abandon();
+                Check(sb, "session-uses-config-snapshot",
+                    snapPlanned == 60 && snapPlannedAfter == 60,
+                    string.Format("会话中把设置从 1 分钟改成 9 分钟，本段计划时间仍是 {0} 秒", snapPlannedAfter), ref fail);
+
+                // ============================================================
+                //  13h. 持久化：迁移可重试 + 历史并发写入
+                // ============================================================
+
+                // (1) 迁移中途失败 → 不写标记、不删旧目录；故障消失后重试能补齐
+                string roam4 = TempDir("pomocc-migrate");
+                string oldDir4 = Path.Combine(roam4, Store.LegacyDataFolderName);
+                string newDir4 = Path.Combine(roam4, Store.DataFolderName);
+                string marker4 = Path.Combine(newDir4, Store.MigrateMarkerName);
+                Directory.CreateDirectory(oldDir4);
+                Directory.CreateDirectory(newDir4);
+                File.WriteAllText(Path.Combine(oldDir4, "config.json"),
+                    "{\"Version\":2,\"FocusMinutes\":44,\"SampleSeconds\":5,\"ViolationSeconds\":180," +
+                    "\"SendMode\":\"smtp\",\"SmtpHost\":\"smtp.qq.com\",\"SmtpPort\":587,\"Rules\":[]}", Encoding.UTF8);
+                File.WriteAllText(Path.Combine(oldDir4, "history.jsonl"),
+                    "{\"Time\":\"2026-01-01 08:00:00\",\"Reason\":\"中途放弃\",\"Status\":\"已发送\"}\r\n", Encoding.UTF8);
+                // 用一个同名目录卡住 history.jsonl 的复制，模拟"复制失败"
+                Directory.CreateDirectory(Path.Combine(newDir4, "history.jsonl"));
+
+                string savedOverride4 = Store.OverrideDir;
+                Store.OverrideDir = null;
+                Store.RoamingRootOverride = roam4;
+                bool firstAttempt = false, retryAttempt = false, configKept = false;
+                bool firstNoMarker = false, firstKeptOldDir = false;
+                try
+                {
+                    Store.MigrateLegacyData(newDir4);
+                    firstNoMarker = !File.Exists(marker4);                     // 没写标记
+                    firstKeptOldDir = Directory.Exists(oldDir4);               // 旧目录没删
+                    firstAttempt = firstNoMarker && firstKeptOldDir
+                                && File.Exists(Path.Combine(newDir4, "config.json"));   // 能复制的部分已经复制
+
+                    Directory.Delete(Path.Combine(newDir4, "history.jsonl"), true);   // 故障消失
+                    Store.MigrateLegacyData(newDir4);                          // 重试
+                    Settings afterRetry = Store.LoadSettings();
+                    retryAttempt = File.Exists(marker4)
+                                && File.Exists(Path.Combine(newDir4, "history.jsonl"))
+                                && !Directory.Exists(oldDir4)
+                                && afterRetry.FocusMinutes == 44;              // 老配置仍是生效的那份
+                    configKept = afterRetry.FocusMinutes == 44;
+                }
+                finally
+                {
+                    Store.RoamingRootOverride = null;
+                    Store.OverrideDir = savedOverride4;
+                }
+                Check(sb, "migration-retry-after-failure",
+                    firstAttempt && retryAttempt && configKept,
+                    string.Format("首次失败：不写标记={0}、旧目录保留={1}；重试后：补齐+标记+删旧目录={2}、配置仍是老的={3}",
+                        firstNoMarker, firstKeptOldDir, retryAttempt, configKept), ref fail);
+
+                // (2) 历史并发写入：两个线程各写 20 条，文件里必须是 40 行完整 JSON（不交错）
+                if (File.Exists(Store.HistoryPath)) File.Delete(Store.HistoryPath);
+                Thread h1 = new Thread(delegate()
+                {
+                    for (int i = 0; i < 20; i++)
+                    {
+                        HistoryEntry he = new HistoryEntry();
+                        he.Time = "2026-01-01 10:00:00";
+                        he.Reason = "并发测试A-" + i;
+                        he.Status = "已发送";
+                        Store.AppendHistory(he);
+                    }
+                });
+                Thread h2 = new Thread(delegate()
+                {
+                    for (int i = 0; i < 20; i++)
+                    {
+                        HistoryEntry he = new HistoryEntry();
+                        he.Time = "2026-01-01 10:00:01";
+                        he.Reason = "并发测试B-" + i;
+                        he.Status = "已发送";
+                        Store.AppendHistory(he);
+                    }
+                });
+                h1.Start(); h2.Start(); h1.Join(); h2.Join();
+                string[] hlines = File.ReadAllLines(Store.HistoryPath, Encoding.UTF8);
+                int goodLines = 0;
+                System.Web.Script.Serialization.JavaScriptSerializer hs =
+                    new System.Web.Script.Serialization.JavaScriptSerializer();
+                for (int i = 0; i < hlines.Length; i++)
+                {
+                    if (hlines[i].Trim().Length == 0) continue;
+                    try { HistoryEntry parsed = hs.Deserialize<HistoryEntry>(hlines[i]); if (parsed != null) goodLines++; }
+                    catch { }
+                }
+                Check(sb, "history-concurrent-writes",
+                    hlines.Length == 40 && goodLines == 40,
+                    string.Format("两个线程各写 20 条：文件里 {0} 行、可解析 {1} 行（不能交错）", hlines.Length, goodLines), ref fail);
+                Store.ReadHistory(50);      // 顺带跑一遍读取（含损坏行计数路径）
+                // ============================================================
+                //  13g. 发信安全边界（自定义 HTTP 地址 / SMTP 地址校验）
+                // ============================================================
+                string urlWhy;
+                bool denyEvil = !SettingsValidator.IsAllowedHttpUrl("http://evil.example/send", out urlWhy);
+                bool allowLocal = SettingsValidator.IsAllowedHttpUrl("http://localhost:8099/mail", out urlWhy);
+                bool allowLocalIp = SettingsValidator.IsAllowedHttpUrl("http://127.0.0.1:8099/mail", out urlWhy);
+                bool allowHttps = SettingsValidator.IsAllowedHttpUrl("https://api.example.com/v1/mail", out urlWhy);
+                bool denyCred = !SettingsValidator.IsAllowedHttpUrl("https://u:p@api.example.com/mail", out urlWhy);
+                bool denyKeyInQuery = !SettingsValidator.IsAllowedHttpUrl("https://api.example.com/mail?api_key=abc", out urlWhy);
+                bool denyRelative = !SettingsValidator.IsAllowedHttpUrl("api.example.com/mail", out urlWhy);
+                Check(sb, "http-url-policy",
+                    denyEvil && allowLocal && allowLocalIp && allowHttps && denyCred && denyKeyInQuery && denyRelative,
+                    string.Format("http://evil.example 拒绝={0}；http://localhost 允许={1}；127.0.0.1 允许={2}；https 允许={3}；带凭据拒绝={4}；Key 写参数拒绝={5}；相对地址拒绝={6}",
+                        denyEvil, allowLocal, allowLocalIp, allowHttps, denyCred, denyKeyInQuery, denyRelative), ref fail);
+
+                // 换行注入：设置校验和发信入口都必须拦住
+                string mailWhy;
+                bool crlfRejected = !SettingsValidator.IsValidEmail("boss@example.com\r\nRCPT TO:<evil@x.com>", out mailWhy)
+                                 && !SettingsValidator.IsValidEmail("boss@example.com\n", out mailWhy);
+                bool displayNameRejected = !SettingsValidator.IsValidEmail("Boss <boss@example.com>", out mailWhy);
+                bool normalAccepted = SettingsValidator.IsValidEmail("boss@example.com", out mailWhy);
+
+                Settings crlfCfg = Settings.Defaults();
+                crlfCfg.Rules = new List<WatchRule>();
+                crlfCfg.Rules.Add(Rule("game.exe", 3));
+                crlfCfg.SupervisorEmail = "boss@example.com\r\nBcc: evil@x.com";
+                crlfCfg.SenderEmail = "me@qq.com";
+                crlfCfg.SetAuthCode("x");
+                bool validatorBlocked = false;
+                List<string> crlfErrs = SettingsValidator.Validate(crlfCfg);
+                for (int i = 0; i < crlfErrs.Count; i++) if (crlfErrs[i].IndexOf("监督人邮箱") >= 0) validatorBlocked = true;
+
+                bool sendEntryBlocked = false;
+                try { SmtpTransport.ValidateAddresses("smtp.qq.com", "me@qq.com", "boss@example.com\r\nRCPT TO:<evil@x.com>"); }
+                catch (Exception) { sendEntryBlocked = true; }
+                bool httpEntryBlocked = false;
+                try { HttpSender.Send(crlfCfg, "主题", "正文"); }
+                catch (Exception) { httpEntryBlocked = true; }
+
+                Check(sb, "smtp-address-crlf-rejected",
+                    crlfRejected && displayNameRejected && normalAccepted && validatorBlocked && sendEntryBlocked && httpEntryBlocked,
+                    string.Format("换行被拒={0}；显示名写法被拒={1}；正常地址通过={2}；设置校验拦住={3}；SMTP 入口拦住={4}；HTTP 入口拦住={5}",
+                        crlfRejected, displayNameRejected, normalAccepted, validatorBlocked, sendEntryBlocked, httpEntryBlocked), ref fail);
+
+                // 固定通道（Resend/SendGrid/Brevo）地址不受自定义规则影响：默认 https 常量
+                Check(sb, "fixed-http-providers-still-https",
+                    SettingsValidator.IsAllowedHttpUrl("https://api.resend.com/emails", out urlWhy)
+                    && SettingsValidator.IsAllowedHttpUrl("https://api.sendgrid.com/v3/mail/send", out urlWhy)
+                    && SettingsValidator.IsAllowedHttpUrl("https://api.brevo.com/v3/smtp/email", out urlWhy),
+                    "三个固定发信接口地址仍然合法", ref fail);
+
                 // 14. 邮件正文生成（含逐条规则时长 + 用户自定义名称）
                 FocusSession demo = Mailer.DemoSession(cfg);
                 string subject = Mailer.ComposeSubject(cfg, "中途放弃（没坚持够时间）", DateTime.Now, demo);
@@ -444,9 +838,9 @@ namespace PomoCC
                 form.Core.StartFocus();
                 Pump(1300);
 
-                bool ticked = form.Core.Session != null && form.Core.Session.ElapsedSeconds >= 1;
+                bool ticked = form.Core.IsFocusing && form.Core.ElapsedSeconds >= 1;
                 Check(sb, "timer-ticking", ticked,
-                    ticked ? string.Format("计时到 {0}，界面文本 {1}", form.Core.Session.ElapsedSeconds, form.Core.TimerText()) : "计时器没走", ref fail);
+                    ticked ? string.Format("计时到 {0} 秒，界面文本 {1}", form.Core.ElapsedSeconds, form.Core.TimerText()) : "计时器没走", ref fail);
 
                 Check(sb, "status-text",
                     form.Core.StatusLine().Length > 0 && form.Core.WatchSummary().Length > 0,
@@ -532,6 +926,43 @@ namespace PomoCC
                         savedCount, sf2.Visible, sf2.SaveStateText), ref fail);
                 // 设置窗口左下角的署名：版本号 + 作者链接（可点区域应正好是作者名）
                 string credit = sf2.CreditInfo;
+                // 异步发信外壳：点击立刻返回（界面不卡）、按钮禁用显示「测试中…」、完成后回 UI 恢复
+                FlatButton btnAsync = FindButton(sf2, "测试连接");
+                int asyncDone = 0;
+                bool asyncOk = false;
+                AsyncMail.Run(sf2, btnAsync, "测试中…", "测试连接",
+                    delegate { Thread.Sleep(400); return "模拟成功"; },
+                    delegate(bool ok, string msg) { asyncDone++; asyncOk = ok; });
+                bool busyNow = btnAsync != null && !btnAsync.Enabled && btnAsync.Text == "测试中…";
+                Pump(1500);
+                bool restored = btnAsync != null && btnAsync.Enabled && btnAsync.Text == "测试连接"
+                             && asyncDone == 1 && asyncOk;
+                Check(sb, "async-send-nonblocking", busyNow && restored,
+                    string.Format("调用立刻返回（期间按钮禁用且显示「测试中…」={0}）；完成后恢复={1}、回调 {2} 次",
+                        busyNow, restored, asyncDone), ref fail);
+
+                // 窗口关闭后返回的旧结果必须被丢弃，不能碰已释放的控件
+                SettingsForm sfClosed = new SettingsForm(Store.LoadSettings(), delegate(Settings sv) { });
+                sfClosed.StartPosition = FormStartPosition.Manual;
+                sfClosed.Location = new Point(-6000, -6000);
+                sfClosed.Show();
+                Pump(300);
+                FlatButton btnClosed = FindButton(sfClosed, "测试连接");
+                int staleDone = 0;
+                AsyncMail.Run(sfClosed, btnClosed, "测试中…", "测试连接",
+                    delegate { Thread.Sleep(500); return "迟到的结果"; },
+                    delegate(bool ok, string msg) { staleDone++; });
+                sfClosed.Close();
+                Pump(1200);
+                Check(sb, "async-send-drops-result-after-close", staleDone == 0,
+                    string.Format("窗口关闭后，后台回调执行次数 = {0}（应为 0）", staleDone), ref fail);
+
+                // 连不上时要立刻报错，而不是卡在系统默认超时上
+                bool refusedFast = false;
+                try { SmtpTransport.Probe("127.0.0.1", 1, false); }
+                catch (Exception) { refusedFast = true; }
+                Check(sb, "smtp-refused-errors-quickly", refusedFast, "端口拒绝连接时立刻抛出可读错误", ref fail);
+
                 Check(sb, "settingsform-credit-block",
                     credit.IndexOf("PomoCC " + App.Version) >= 0
                     && credit.IndexOf("可点区域「" + App.Author + "」") >= 0

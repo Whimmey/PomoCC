@@ -2,11 +2,11 @@
 
 > 没坚持完专注？偷偷玩游戏？它会给你的监督人发一封告状邮件。
 
-**Focus, or I CC (emails) your supervisor. **—— **Windows 桌面番茄钟 + 监督名单进程监测 + 自动告状邮件。**
+**Focus, or I CC (emails) your supervisor. —— Windows 桌面番茄钟 + 监督名单进程监测 + 自动告状邮件。**
 单文件 `exe`（约 150 KB），不需要安装、不需要 .NET SDK、不引任何第三方库 —— 用 Windows 自带的 .NET Framework 编译器直接产出。
 
 <p>
-  <img alt="version" src="https://img.shields.io/badge/version-0.1-blue">
+  <img alt="version" src="https://img.shields.io/badge/version-0.2-blue">
   <img alt="license" src="https://img.shields.io/badge/license-Apache--2.0-green">
   <img alt="platform" src="https://img.shields.io/badge/platform-Windows%2010%2F11-lightgrey">
   <img alt="runtime" src="https://img.shields.io/badge/.NET%20Framework-4.x%20(built--in)-purple">
@@ -223,4 +223,6 @@ PomoCC/
 
 ---
 
-**版本 0.1** —— 首个公开版本。功能已可用，但还没经过大规模使用检验，欢迎反馈问题。
+**版本 0.2** —— 监督核心改为独立后台计时（界面卡住不再少算专注时间）、正确处理睡眠/休眠，
+进程按「PID + 启动时间」识别实例、规则按 exe 汇总；发信入口加了地址校验与连接超时，
+手动测试/重发改到后台线程，数据迁移失败可重试。详见 [CHANGELOG.md](CHANGELOG.md)。
