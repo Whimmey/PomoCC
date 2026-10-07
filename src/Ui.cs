@@ -134,8 +134,7 @@ namespace PomoCC
             Font = kind == Kind.Primary ? Theme.ButtonStrong : Theme.Button;
             SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer |
                      ControlStyles.UserPaint | ControlStyles.ResizeRedraw |
-                     ControlStyles.Selectable | ControlStyles.StandardClick |
-                     ControlStyles.StandardDoubleClick | ControlStyles.SupportsTransparentBackColor, true);
+                     ControlStyles.Selectable | ControlStyles.SupportsTransparentBackColor, true);
             BackColor = Color.Transparent;
             Cursor = Cursors.Hand;
             TabStop = true;

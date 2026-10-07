@@ -78,6 +78,9 @@ namespace PomoCC
     /// <summary>全部用户设置。密码/授权码只以加密或散列形式落盘。</summary>
     public class Settings
     {
+        /// <summary>新配置的默认署名，不读取 Windows 账户名，避免把本机用户名带进邮件。</summary>
+        public const string DefaultUserName = "user";
+
         public int Version { get; set; }
         public string UserName { get; set; }
         public string SupervisorEmail { get; set; }
@@ -119,7 +122,7 @@ namespace PomoCC
         {
             Settings s = new Settings();
             s.Version = 2;
-            s.UserName = Environment.UserName;
+            s.UserName = DefaultUserName;
             s.SupervisorEmail = "";
             s.SendMode = "smtp";
             s.SenderEmail = "";

@@ -372,13 +372,18 @@ namespace PomoCC
                 s.Version = 2;
             }
 
+            // 注意：这里**没有**「把旧的默认署名（本机账户名）改成 user」的迁移。
+            // v0.2.0 发布时还没有任何用户，所以只把新配置的默认值改成 Settings.DefaultUserName，
+            // 已有配置一律不动 —— 少一段只跑一次、还要靠 Version 号兜底的迁移逻辑。
+            // 真到了需要清理存量配置的时候，再加 Version < 3 的迁移。
+
             if (s.FocusMinutes <= 0) s.FocusMinutes = d.FocusMinutes;
             if (s.ViolationSeconds <= 0) s.ViolationSeconds = d.ViolationSeconds;
             if (s.SampleSeconds <= 0) s.SampleSeconds = d.SampleSeconds;
             if (string.IsNullOrEmpty(s.SendMode)) s.SendMode = d.SendMode;
             if (string.IsNullOrEmpty(s.SmtpHost)) s.SmtpHost = d.SmtpHost;
             if (s.SmtpPort <= 0) s.SmtpPort = d.SmtpPort;
-            if (string.IsNullOrEmpty(s.UserName)) s.UserName = d.UserName;
+            if (string.IsNullOrEmpty(s.UserName)) s.UserName = Settings.DefaultUserName;
 
             // 旧版「一串进程名」自动迁移成带规则时长的规则表，不丢用户已填的名字
             if (s.Rules.Count == 0 && s.WatchList.Count > 0)

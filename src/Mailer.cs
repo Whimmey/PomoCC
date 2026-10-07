@@ -64,7 +64,7 @@ namespace PomoCC
             }
 
             string text = template;
-            text = text.Replace("{名字}", string.IsNullOrEmpty(s.UserName) ? Environment.UserName : s.UserName);
+            text = text.Replace("{名字}", string.IsNullOrEmpty(s.UserName) ? Settings.DefaultUserName : s.UserName);
             text = text.Replace("{时间}", when.ToString("yyyy-MM-dd HH:mm"));
             text = text.Replace("{日期}", when.ToString("M月d日"));
             text = text.Replace("{时刻}", when.ToString("HH:mm"));

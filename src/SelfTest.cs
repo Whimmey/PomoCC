@@ -146,8 +146,10 @@ namespace PomoCC
                 // 1. 默认配置
                 Settings def = Settings.Defaults();
                 Check(sb, "settings-defaults",
-                    def.FocusMinutes == 25 && def.SampleSeconds == 5 && def.Rules != null,
-                    string.Format("专注 {0} 分钟，采样 {1} 秒", def.FocusMinutes, def.SampleSeconds), ref fail);
+                    def.FocusMinutes == 25 && def.SampleSeconds == 5 && def.Rules != null
+                    && def.UserName == Settings.DefaultUserName && def.UserName == "user",
+                    string.Format("专注 {0} 分钟，采样 {1} 秒，默认署名={2}",
+                        def.FocusMinutes, def.SampleSeconds, def.UserName), ref fail);
 
                 // 2. 配置往返（含规则表）
                 def.SupervisorEmail = "boss@example.com";
@@ -2258,7 +2260,11 @@ namespace PomoCC
                 shim.Dispose();
 
                 // 再把四个真实窗口整体渲染，扫「未绘制区域」
-                CheckWindow(sb, new MainForm(), "mainform", true, ref fail);
+                MainForm mainForm = new MainForm();
+                Check(sb, "mainform-no-timer-title",
+                    !HasLabelText(mainForm, "番茄钟监督"),
+                    "时间圆环上方不再显示重复的产品名", ref fail);
+                CheckWindow(sb, mainForm, "mainform", true, ref fail);
                 CheckWindow(sb, new SettingsForm(Store.LoadSettings()), "settingsform", true, ref fail);
                 AppPickerForm pickerForm = new AppPickerForm(3);
                 // 默认用真实枚举结果；POMOCC_TEST_EMPTY_APP_LIST=1 时模拟"枚举不到程序"，
@@ -2602,6 +2608,17 @@ namespace PomoCC
                 if (found != null) return found;
             }
             return null;
+        }
+
+        private static bool HasLabelText(Control root, string text)
+        {
+            Label label = root as Label;
+            if (label != null && label.Text == text) return true;
+            foreach (Control c in root.Controls)
+            {
+                if (HasLabelText(c, text)) return true;
+            }
+            return false;
         }
 
         private const int WM_PRINT = 0x0317;

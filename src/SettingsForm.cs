@@ -53,6 +53,7 @@ namespace PomoCC
 
         // 底部按钮行上的署名（版本号 + 作者链接）
         private LinkLabel lnkAuthor;
+        private DateTime lastDataFolderOpenUtc = DateTime.MinValue;
 
         /// <summary>供自检：署名区的版本号与作者链接信息。</summary>
         internal string CreditInfo
@@ -448,11 +449,7 @@ namespace PomoCC
             FlatButton pw = MakeButton("修改密码", FlatButton.Kind.Secondary, 100);
             pw.Click += delegate { ChangePassword(); };
             FlatButton open = MakeButton("打开数据文件夹", FlatButton.Kind.Secondary, 132);
-            open.Click += delegate
-            {
-                try { System.Diagnostics.Process.Start("explorer.exe", "\"" + Store.Dir + "\""); }
-                catch { }
-            };
+            open.Click += delegate { OpenDataFolder(); };
             Ui.Add(other, Ui.ButtonRow(pw, open));
             Ui.AddCard(pageContent, cardOther);
 
@@ -533,6 +530,31 @@ namespace PomoCC
             FlatButton b = new FlatButton(text, kind);
             b.Width = width;
             return b;
+        }
+
+        /// <summary>
+        /// 打开数据目录。按钮事件若因 WinForms 消息重复到达，短时间内只允许启动一次外壳进程。
+        /// 直接把目录交给 Shell，避免手动拼接 explorer.exe 参数造成额外窗口行为。
+        /// </summary>
+        private void OpenDataFolder()
+        {
+            DateTime now = DateTime.UtcNow;
+            if ((now - lastDataFolderOpenUtc).TotalMilliseconds < 800) return;
+            lastDataFolderOpenUtc = now;
+
+            try
+            {
+                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+                {
+                    FileName = Store.Dir,
+                    UseShellExecute = true
+                });
+            }
+            catch
+            {
+                // 保留原行为：打开失败不打断设置窗口；失败后允许下次点击重试。
+                lastDataFolderOpenUtc = DateTime.MinValue;
+            }
         }
 
         private FlatButton NavButton(string text, EventHandler onClick)

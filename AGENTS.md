@@ -434,6 +434,8 @@ Re-v0.2 复审收尾新增（同样在 `SelfTest.cs`）：
 | `settings-sound-row-aligned` | 复选框文字与「提示音」链接**垂直居中对齐**（容差 1px）、同一行、链接在右边 |
 | `settings-content-buttons-uniform` | 同一行按钮**等高、同一水平线、上下都留了白**（用户要求"统一、别太挤"） |
 | `sound-clip-valid` / `sound-played-is-ours` | 合成的提示音是合法 PCM（时长/峰值不削顶）、且完成提醒响的就是这一声 |
+| `settings-defaults` | 默认署名是 `Settings.DefaultUserName`（`user`），**不读** `Environment.UserName`（不做存量迁移，见「关键实现细节」） |
+| `mainform-no-timer-title` | 时间圆环上方不再有重复的「番茄钟监督」标签（渲染自检里连窗口一起扫） |
 
 ### 测试对环境的要求（DPAPI 与用户配置文件）
 
@@ -506,6 +508,15 @@ Re-v0.2 复审收尾新增（同样在 `SelfTest.cs`）：
   两个开关 `Settings.NotifyOnComplete` / `NotifySound` 默认开，可在「规则与其他」页关掉。
   配置 **v1 → v2** 迁移要注意：老配置里没有这两个 bool 字段，反序列化后是 false（等于关），
   `Store.Normalize` 里按 `Version < 2` 显式补成 true，否则老用户升级后提醒会**静默失效**。
+  署名默认值（隐私修正）：v2 及更早的 `Settings.Defaults()` 拿 `Environment.UserName`
+  （本机账户名）当默认署名，会把本机用户名跟着告状邮件发出去；现在用
+  `Settings.DefaultUserName`（`user`）。**刻意不做存量清理**：v0.2.0 发布时还没有用户，
+  所以已有配置一律不动，`Store.Normalize` 里**没有** `Version < 3` 的迁移
+  —— 省掉一段"只跑一次、还要靠版本号兜底"的逻辑；真要清理存量时再加（`Settings.Version` 仍是 2）。
+- **「打开数据文件夹」只开一个窗口**：`FlatButton` 去掉了 `StandardClick` /
+  `StandardDoubleClick` 两个 ControlStyles（自绘控件自己处理点击语义，留着它们会让点击事件
+  重复到达），按钮处理函数 `OpenDataFolder()` 里再加 800ms 去重窗口，并用 `UseShellExecute`
+  把目录交给 Shell 打开，不再自己拼 `explorer.exe` 参数；打开失败会复位去重窗口以便重试。
 - **发送不阻塞界面**：邮件在线程池发送，结果通过事件回到界面（`BeginInvoke`）并用托盘气泡提示；
   失败时邮件全文保留在记录里，可手动补发。
 - **密码门禁**：退出、打开设置都需要密码；首运行引导设置（取消则用默认 `123456` 并明确告知）。

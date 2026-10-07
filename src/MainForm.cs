@@ -99,15 +99,6 @@ namespace PomoCC
             cardStack.Dock = DockStyle.Fill;
             main.Controls.Add(cardStack);
 
-            Label title = new Label();
-            title.Text = "番茄钟监督";
-            title.Font = Theme.SectionTitle;
-            title.ForeColor = Theme.SubText;
-            title.TextAlign = ContentAlignment.MiddleCenter;
-            title.AutoSize = false;
-            title.Height = 24;
-            Ui.Add(cardStack, title);
-
             dial = new TimerDial();
             dial.Height = 240;
             dial.HintText = "双击可改时长";
