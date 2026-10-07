@@ -449,7 +449,7 @@ namespace PomoCC
             bar.Controls.Add(lblSaveState, 0, 0);
 
             // 版本号 + 作者链接（作者名可点，打开 GitHub 仓库）
-            string creditText = "PomoCC " + App.Version + " · 作者 " + App.Author;
+            string creditText = "PomoCC " + App.Version + " · " + App.Author;
             lnkAuthor = new LinkLabel();
             lnkAuthor.Text = creditText;
             lnkAuthor.Font = Theme.BodySmall;
