@@ -21,6 +21,13 @@ namespace PomoCC
             string from = s.SenderEmail;
             string to = s.SupervisorEmail;
 
+            // 协议边界再校验一次：不能只依赖设置界面，直接调用发送入口也必须拦住
+            string why;
+            if (!SettingsValidator.IsValidEmail(from, out why))
+                throw new InvalidOperationException("发件邮箱不合法：" + why + "。");
+            if (!SettingsValidator.IsValidEmail(to, out why))
+                throw new InvalidOperationException("收件邮箱不合法：" + why + "。");
+
             switch (s.SendMode)
             {
                 case "resend":
@@ -57,6 +64,9 @@ namespace PomoCC
                     url = s.HttpUrl;
                     if (string.IsNullOrEmpty(url))
                         throw new InvalidOperationException("没有填写自定义接口地址。");
+                    // 明文 http 只允许本机；不允许地址里带凭据或把 Key 写在参数上
+                    if (!SettingsValidator.IsAllowedHttpUrl(url, out why))
+                        throw new InvalidOperationException("自定义接口地址不合法：" + why + "。");
                     json = "{\"from\":" + J(from)
                          + ",\"to\":" + J(to)
                          + ",\"subject\":" + J(subject)

@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.IO;
@@ -13,6 +13,7 @@ namespace PomoCC
         /// <summary>保存时立即回调（让主窗口马上应用，不必等关窗）。</summary>
         private Action<Settings> onSave;
         private Label lblSaveState;
+        private FlatButton btnProbe, btnTestMail;
         private InputBox inSubjectTpl;
         private InputBox memoIntro;
         private InputBox memoOutro;
@@ -253,10 +254,12 @@ namespace PomoCC
                               "163 邮箱：smtp.163.com，端口 465（取消勾选 STARTTLS）。\r\n" +
                               "Gmail：需先开启两步验证并生成「应用专用密码」，smtp.gmail.com，端口 587。"));
 
-            FlatButton probe = MakeButton("测试连接", FlatButton.Kind.Secondary, 100);
-            probe.Click += delegate { ProbeSmtp(); };
-            FlatButton testMail = MakeButton("发送测试邮件", FlatButton.Kind.Secondary, 132);
-            testMail.Click += delegate { TestSend(); };
+            btnProbe = MakeButton("测试连接", FlatButton.Kind.Secondary, 100);
+            btnProbe.Click += delegate { ProbeSmtp(); };
+            btnTestMail = MakeButton("发送测试邮件", FlatButton.Kind.Secondary, 132);
+            btnTestMail.Click += delegate { TestSend(); };
+            FlatButton probe = btnProbe;
+            FlatButton testMail = btnTestMail;
             FlatButton preview = MakeButton("预览告状邮件", FlatButton.Kind.Secondary, 132);
             preview.Click += delegate { TextForm.Show(this, "告状邮件预览（不会真的发送）", Mailer.PreviewBody(Collect())); };
             Ui.Add(smtp, Ui.ButtonRow(probe, testMail, preview));
@@ -972,14 +975,16 @@ namespace PomoCC
                 return;
             }
 
-            Cursor = Cursors.WaitCursor;
-            string ok = null, err = null;
-            try { ok = SmtpTransport.Probe(host, numPort.Value, chkStartTls.Checked); }
-            catch (Exception ex) { err = ex.Message; }
-            finally { Cursor = Cursors.Default; }
-
-            if (err == null) MessageBox.Show(this, ok, "连接测试", MessageBoxButtons.OK, MessageBoxIcon.Information);
-            else MessageBox.Show(this, "连不上：\r\n\r\n" + err, "连接测试", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            // 放到后台线程连接，界面不卡；按钮变「测试中…」同时防重复点击
+            int port = numPort.Value;
+            bool startTls = chkStartTls.Checked;
+            AsyncMail.Run(this, btnProbe, "测试中…", "测试连接",
+                delegate { return SmtpTransport.Probe(host, port, startTls); },
+                delegate(bool ok, string msg)
+                {
+                    if (ok) MessageBox.Show(this, msg, "连接测试", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    else MessageBox.Show(this, "连不上：\r\n\r\n" + msg, "连接测试", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                });
         }
 
         private void ChangePassword()
@@ -1006,18 +1011,19 @@ namespace PomoCC
             Settings s = Collect();
 
             List<string> errs = new List<string>();
-            if (string.IsNullOrEmpty(s.SupervisorEmail) || s.SupervisorEmail.IndexOf('@') < 0)
-                errs.Add("没填监督人邮箱。");
-            if (string.IsNullOrEmpty(s.SenderEmail) || s.SenderEmail.IndexOf('@') < 0)
-                errs.Add("没填发件邮箱。");
+            string why;
+            if (!SettingsValidator.IsValidEmail(s.SupervisorEmail, out why)) errs.Add("监督人邮箱：" + why + "。");
+            if (!SettingsValidator.IsValidEmail(s.SenderEmail, out why)) errs.Add("发件邮箱：" + why + "。");
             if (s.SendMode == "smtp")
             {
                 if (string.IsNullOrEmpty(s.SmtpHost)) errs.Add("没填 SMTP 服务器。");
                 if (string.IsNullOrEmpty(s.GetAuthCode())) errs.Add("没填授权码。");
             }
-            else if (string.IsNullOrEmpty(s.GetApiKey()))
+            else
             {
-                errs.Add("没填 API Key。");
+                if (s.SendMode == "custom" && !SettingsValidator.IsAllowedHttpUrl(s.HttpUrl, out why))
+                    errs.Add("自定义接口地址：" + why + "。");
+                if (string.IsNullOrEmpty(s.GetApiKey())) errs.Add("没填 API Key。");
             }
             if (errs.Count > 0)
             {
@@ -1026,23 +1032,20 @@ namespace PomoCC
                 return;
             }
 
-            Cursor = Cursors.WaitCursor;
-            string err = null;
-            try
-            {
-                Mailer.Send(s, "【番茄钟监督】测试邮件",
-                    "这是一封测试邮件。\r\n\r\n收到它说明「番茄钟监督」的发信通道已经配置好了。\r\n" +
-                    "以后你在规定时间里没坚持完专注、或者某个程序超过了它自己的规则时长，都会通过这个通道自动发信。\r\n");
-            }
-            catch (Exception ex) { err = ex.Message; }
-            finally { Cursor = Cursors.Default; }
-
-            if (err == null)
-                MessageBox.Show(this, "发送成功，去收件箱（和垃圾箱）看一眼。", "测试发信",
-                    MessageBoxButtons.OK, MessageBoxIcon.Information);
-            else
-                MessageBox.Show(this, "发送失败：\r\n\r\n" + err, "测试发信",
-                    MessageBoxButtons.OK, MessageBoxIcon.Error);
+            // 后台线程发信：超时/不可达时界面照常可用，发送期间按钮显示「发送中…」
+            AsyncMail.Run(this, btnTestMail, "发送中…", "发送测试邮件",
+                delegate
+                {
+                    Mailer.Send(s, "【番茄钟监督】测试邮件",
+                        "这是一封测试邮件。\r\n\r\n收到它说明「番茄钟监督」的发信通道已经配置好了。\r\n" +
+                        "以后你在规定时间里没坚持完专注、或者某个程序超过了它自己的规则时长，都会通过这个通道自动发信。\r\n");
+                    return "发送成功，去收件箱（和垃圾箱）看一眼。";
+                },
+                delegate(bool ok, string msg)
+                {
+                    if (ok) MessageBox.Show(this, msg, "测试发信", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    else MessageBox.Show(this, "发送失败：\r\n\r\n" + msg, "测试发信", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                });
         }
     }
 }

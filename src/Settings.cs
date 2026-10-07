@@ -244,23 +244,123 @@ namespace PomoCC
     /// <summary>保存/发送前的必填项检查。</summary>
     public static class SettingsValidator
     {
+        /// <summary>是否包含换行/控制字符（SMTP 命令注入、HTTP 头注入的入口）。</summary>
+        public static bool HasControlChars(string s)
+        {
+            if (string.IsNullOrEmpty(s)) return false;
+            for (int i = 0; i < s.Length; i++)
+            {
+                char c = s[i];
+                if (c == '\r' || c == '\n' || c == '\0' || char.IsControl(c)) return true;
+            }
+            return false;
+        }
+
+        /// <summary>
+        /// 严格校验邮箱：拒绝换行/控制字符/空格，必须能被 MailAddress 正确解析，
+        /// 而且只能是"纯地址"（不接受 显示名 &lt;addr&gt; 写法，它会破坏 SMTP 命令）。
+        /// </summary>
+        public static bool IsValidEmail(string addr, out string error)
+        {
+            error = null;
+            if (string.IsNullOrEmpty(addr)) { error = "还没填"; return false; }
+            if (HasControlChars(addr)) { error = "不能包含换行或控制字符"; return false; }
+            string a = addr.Trim();
+            if (a.IndexOf(' ') >= 0) { error = "不能包含空格"; return false; }
+            try
+            {
+                System.Net.Mail.MailAddress ma = new System.Net.Mail.MailAddress(a);
+                if (!string.Equals(ma.Address, a, StringComparison.OrdinalIgnoreCase))
+                {
+                    error = "只能填纯邮箱地址，不要带显示名或尖括号";
+                    return false;
+                }
+                if (ma.Host.IndexOf('.') < 0) { error = "域名看起来不完整"; return false; }
+                return true;
+            }
+            catch
+            {
+                error = "格式不合法";
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// 自定义发信接口地址的规则：
+        ///   · 必须是完整 URL；
+        ///   · https 一律允许；
+        ///   · 明文 http 只允许本机（localhost / 127.0.0.1 / [::1]），其余拒绝；
+        ///   · 地址里不能带用户名/密码，也不能把 API Key 写在查询参数上。
+        /// </summary>
+        public static bool IsAllowedHttpUrl(string url, out string error)
+        {
+            error = null;
+            if (string.IsNullOrEmpty(url)) { error = "还没填"; return false; }
+            if (HasControlChars(url)) { error = "包含换行或控制字符"; return false; }
+            if (url.Trim() != url) { error = "首尾有多余空格"; return false; }
+
+            Uri u;
+            if (!Uri.TryCreate(url, UriKind.Absolute, out u))
+            {
+                error = "必须是完整地址（以 http:// 或 https:// 开头）";
+                return false;
+            }
+            if (u.Scheme != Uri.UriSchemeHttps && u.Scheme != Uri.UriSchemeHttp)
+            {
+                error = "只支持 http 或 https";
+                return false;
+            }
+            if (!string.IsNullOrEmpty(u.UserInfo))
+            {
+                error = "地址里不能带用户名/密码";
+                return false;
+            }
+            if (u.Scheme == Uri.UriSchemeHttp)
+            {
+                string h = u.Host.ToLowerInvariant();
+                bool local = (h == "localhost" || h == "127.0.0.1" || h == "::1" || h == "[::1]");
+                if (!local)
+                {
+                    error = "明文 http 只允许本机地址（localhost / 127.0.0.1 / [::1]），其它请用 https";
+                    return false;
+                }
+            }
+
+            string q = u.Query.ToLowerInvariant();
+            string[] bad = { "api_key", "apikey", "api-key", "access_token", "token", "secret", "password" };
+            for (int i = 0; i < bad.Length; i++)
+            {
+                if (q.IndexOf(bad[i]) >= 0)
+                {
+                    error = "API Key 请放在请求头里，不要写在地址参数上";
+                    return false;
+                }
+            }
+            return true;
+        }
+
         public static List<string> Validate(Settings s)
         {
             List<string> errs = new List<string>();
-            if (string.IsNullOrEmpty(s.SupervisorEmail) || s.SupervisorEmail.IndexOf('@') < 0)
-                errs.Add("请填写监督人邮箱（告状邮件的收件人）。");
-            if (string.IsNullOrEmpty(s.SenderEmail) || s.SenderEmail.IndexOf('@') < 0)
-                errs.Add("请填写你自己的发件邮箱。");
+
+            string why;
+            if (!IsValidEmail(s.SupervisorEmail, out why))
+                errs.Add("监督人邮箱" + (string.IsNullOrEmpty(why) ? "不合法。" : "：" + why + "。"));
+            if (!IsValidEmail(s.SenderEmail, out why))
+                errs.Add("你的发件邮箱" + (string.IsNullOrEmpty(why) ? "不合法。" : "：" + why + "。"));
 
             if (s.SendMode == "smtp")
             {
                 if (string.IsNullOrEmpty(s.SmtpHost)) errs.Add("请填写 SMTP 服务器地址。");
+                else if (HasControlChars(s.SmtpHost) || s.SmtpHost.IndexOf(' ') >= 0)
+                    errs.Add("SMTP 服务器地址不能包含空格或换行。");
                 if (s.SmtpPort <= 0 || s.SmtpPort > 65535) errs.Add("SMTP 端口不合法（常用 587 或 465）。");
                 if (string.IsNullOrEmpty(s.GetAuthCode())) errs.Add("请填写邮箱授权码（不是登录密码）。");
             }
             else
             {
-                if (string.IsNullOrEmpty(s.HttpUrl) && s.SendMode == "custom") errs.Add("请填写自定义接口地址。");
+                if (s.SendMode == "custom" && !IsAllowedHttpUrl(s.HttpUrl, out why))
+                    errs.Add("自定义接口地址" + (string.IsNullOrEmpty(why) ? "不合法。" : "：" + why + "。"));
                 if (string.IsNullOrEmpty(s.GetApiKey())) errs.Add("请填写 API Key。");
             }
 

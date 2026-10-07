@@ -550,40 +550,33 @@ namespace PomoCC
                         "把这封告状邮件重新发一次给 " + Store.LoadSettings().SupervisorEmail + "？\r\n\r\n（原记录会保留，重发结果会另记一条）",
                         "重发告状邮件", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return;
 
-                Cursor = Cursors.WaitCursor;
-                string status;
-                string err = "";
-                try
-                {
-                    Mailer.Send(Store.LoadSettings(), e.Subject, e.Body);
-                    status = "重发成功";
-                }
-                catch (Exception ex)
-                {
-                    status = "重发失败";
-                    err = ex.Message;
-                }
-                finally
-                {
-                    Cursor = Cursors.Default;
-                }
-
+                // 后台线程发送，界面不卡；发送期间按钮变「重发中…」并禁用，防止重复点击
                 HistoryEntry again = new HistoryEntry();
                 again.Time = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
                 again.Reason = e.Reason + "（重发 " + e.Time + "）";
                 again.Subject = e.Subject;
                 again.Body = e.Body;
-                again.Status = status;
-                again.Error = err;
-                Store.AppendHistory(again);
-                Store.Log("重发告状邮件：" + status + (err.Length > 0 ? "：" + err : ""));
 
-                int idx = list.Rows.Add(again.Time, again.Reason, StatusText(again));
-                list.Rows[idx].Tag = again;
-                list.ClearSelection();
-                list.CurrentCell = list.Rows[idx].Cells[0];
-                list.Rows[idx].Selected = true;
-                ShowDetail(again);
+                AsyncMail.Run(this, resend, "重发中…", "重发选中",
+                    delegate
+                    {
+                        Mailer.Send(Store.LoadSettings(), e.Subject, e.Body);
+                        return "重发成功";
+                    },
+                    delegate(bool ok, string msg)
+                    {
+                        again.Status = ok ? "重发成功" : "重发失败";
+                        again.Error = ok ? "" : msg;
+                        Store.AppendHistory(again);
+                        Store.Log("重发告状邮件：" + again.Status + (again.Error.Length > 0 ? "：" + again.Error : ""));
+
+                        int idx = list.Rows.Add(again.Time, again.Reason, StatusText(again));
+                        list.Rows[idx].Tag = again;
+                        list.ClearSelection();
+                        list.CurrentCell = list.Rows[idx].Cells[0];
+                        list.Rows[idx].Selected = true;
+                        ShowDetail(again);
+                    });
             };
 
             FlatButton close = new FlatButton("关闭", FlatButton.Kind.Primary);

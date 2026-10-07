@@ -17,12 +17,41 @@ namespace PomoCC
     /// </summary>
     public static class SmtpTransport
     {
+        /// <summary>建立 TCP 连接的显式超时。ReceiveTimeout 只管读，管不了连接阶段。</summary>
+        public const int ConnectTimeoutMs = 15000;
+
+        /// <summary>带超时的连接：超时就主动断开并报错，不让界面卡在系统默认超时上。</summary>
+        private static void Connect(TcpClient client, string host, int port, int timeoutMs)
+        {
+            IAsyncResult ar = client.BeginConnect(host, port, null, null);
+            if (!ar.AsyncWaitHandle.WaitOne(timeoutMs, false))
+            {
+                try { client.Close(); } catch { }
+                throw new IOException(string.Format("连接 {0}:{1} 超时（{2} 秒没连上）", host, port, timeoutMs / 1000));
+            }
+            client.EndConnect(ar);      // 连接被拒等错误在这里抛出
+        }
+
+        /// <summary>协议边界校验：不能只依赖设置界面，直接调用发送入口也必须拦住。</summary>
+        public static void ValidateAddresses(string host, string from, string to)
+        {
+            string why;
+            if (string.IsNullOrEmpty(host)) throw new InvalidOperationException("没有填写 SMTP 服务器地址。");
+            if (SettingsValidator.HasControlChars(host) || host.IndexOf(' ') >= 0)
+                throw new InvalidOperationException("SMTP 服务器地址里不能有空格或换行。");
+            if (!SettingsValidator.IsValidEmail(from, out why))
+                throw new InvalidOperationException("发件邮箱不合法：" + why + "。");
+            if (!SettingsValidator.IsValidEmail(to, out why))
+                throw new InvalidOperationException("收件邮箱不合法：" + why + "。");
+        }
+
         public static void Send(string host, int port, bool startTls, string user, string pass,
                                 string from, string to, string subject, string body)
         {
+            ValidateAddresses(host, from, to);       // 发信前重新校验（防 CRLF 注入）
             using (TcpClient client = new TcpClient())
             {
-                client.Connect(host, port);
+                Connect(client, host, port, ConnectTimeoutMs);
                 client.ReceiveTimeout = 30000;
                 client.SendTimeout = 30000;
 
@@ -67,9 +96,12 @@ namespace PomoCC
         /// <summary>只做连接/加密握手探测，不登录也不发信（供“测试连接”使用）。</summary>
         public static string Probe(string host, int port, bool startTls)
         {
+            if (string.IsNullOrEmpty(host)) throw new InvalidOperationException("没有填写 SMTP 服务器地址。");
+            if (SettingsValidator.HasControlChars(host) || host.IndexOf(' ') >= 0)
+                throw new InvalidOperationException("SMTP 服务器地址里不能有空格或换行。");
             using (TcpClient client = new TcpClient())
             {
-                client.Connect(host, port);
+                Connect(client, host, port, ConnectTimeoutMs);
                 client.ReceiveTimeout = 15000;
                 client.SendTimeout = 15000;
 
