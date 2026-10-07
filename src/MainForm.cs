@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Runtime.InteropServices;
@@ -317,13 +317,12 @@ namespace PomoCC
 
         private void StartTicking()
         {
+            // 这个 UI 定时器**只负责刷新界面**。
+            // 计时/采样/规则判定由 Supervisor 自己的后台线程完成（见 Supervisor.StartLoop），
+            // 所以界面卡住时专注时间照常走。
             tick = new System.Windows.Forms.Timer();
             tick.Interval = 1000;
-            tick.Tick += delegate
-            {
-                sup.Tick();
-                RefreshUi();
-            };
+            tick.Tick += delegate { RefreshUi(); };
             tick.Start();
         }
 
@@ -336,30 +335,28 @@ namespace PomoCC
             }
             if (IsDisposed) return;
 
-            bool active = sup.IsFocusing;
-            int progress = 0;
-            if (active && sup.Session != null && sup.Session.PlannedSeconds > 0)
-                progress = sup.Session.ElapsedSeconds * 100 / sup.Session.PlannedSeconds;
+            // 只读快照：界面绝不直接读后台线程正在改的 Session/Stats
+            Supervisor.Snapshot snap = sup.Read();
 
-            dial.Active = active;
-            dial.Progress = progress;
-            dial.SetState(sup.TimerText(), active ? "专注中" : "待机");
-            dial.HintText = active ? "" : "双击可改时长";
+            dial.Active = snap.Focusing;
+            dial.Progress = snap.ProgressPercent;
+            dial.SetState(snap.TimerText, snap.Focusing ? "专注中" : "待机");
+            dial.HintText = snap.Focusing ? "" : "双击可改时长";
 
-            lblStatus.Text = sup.StatusLine();
+            lblStatus.Text = snap.StatusLine;
             // 把「程序」两个字设成可点区域（蓝色下划线）；句子变了就重算位置
             string statusText = lblStatus.Text;
             int linkAt = statusText.LastIndexOf("程序", StringComparison.Ordinal);
             lblStatus.LinkArea = linkAt >= 0 ? new LinkArea(linkAt, 2) : new LinkArea(0, 0);
-            lblWatch.Text = sup.WatchSummary();
-            lblToday.Text = sup.TodayText();
+            lblWatch.Text = snap.WatchSummary;
+            lblToday.Text = snap.TodayText;
 
-            btnStart.Enabled = !active;
-            btnAbandon.Enabled = active;
+            btnStart.Enabled = !snap.Focusing;
+            btnAbandon.Enabled = snap.Focusing;
 
             if (tray != null)
             {
-                string t = active ? "专注中 " + sup.TimerText() : "番茄钟监督 · 待机";
+                string t = snap.Focusing ? "专注中 " + snap.TimerText : "番茄钟监督 · 待机";
                 tray.Text = t.Length > 62 ? t.Substring(0, 62) : t;
             }
         }
@@ -556,6 +553,7 @@ namespace PomoCC
         {
             if (disposing)
             {
+                if (sup != null) sup.StopLoop();   // 停掉后台监督线程
                 if (tick != null) tick.Dispose();
                 if (tray != null)
                 {

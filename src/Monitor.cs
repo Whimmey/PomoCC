@@ -13,10 +13,44 @@ namespace PomoCC
         public string Name { get; set; }             // 用户在设置里起的名称
         public int Pid { get; set; }
         public DateTime StartTime { get; set; }
-        public int SessionSeconds { get; set; }      // 本次专注窗口内累计运行秒数
+        public int SessionSeconds { get; set; }      // 本次专注窗口内累计运行秒数（按 exe 汇总）
         public int LimitMinutes { get; set; }        // 命中规则允许的时长
         public DateTime FirstSeen { get; set; }
         public DateTime LastSeen { get; set; }
+
+        /// <summary>本次专注期间见过的进程实例（身份 = PID + 启动时间）。</summary>
+        public List<ProcessInstance> Instances { get; set; }
+
+        public WatchProcess()
+        {
+            Instances = new List<ProcessInstance>();
+        }
+
+        /// <summary>实例个数：邮件和界面用它说明"这个程序开了几个"。</summary>
+        public int InstanceCount { get { return Instances == null ? 0 : Instances.Count; } }
+
+        /// <summary>按 PID + 启动时间找实例；找不到返回 null（说明是新开的实例）。</summary>
+        public ProcessInstance FindInstance(int pid, DateTime start)
+        {
+            if (Instances == null) return null;
+            for (int i = 0; i < Instances.Count; i++)
+            {
+                ProcessInstance it = Instances[i];
+                if (it.Pid != pid) continue;
+                if (SameStart(it.StartTime, start)) return it;
+            }
+            return null;
+        }
+
+        /// <summary>
+        /// 启动时间比较。拿不到启动时间（系统进程）时退回只比 PID；
+        /// 否则容忍 2 秒误差 —— PID 复用时启动时间会差很远，不会被误认成同一个实例。
+        /// </summary>
+        private static bool SameStart(DateTime a, DateTime b)
+        {
+            if (a == DateTime.MinValue || b == DateTime.MinValue) return a == b;
+            return Math.Abs((a - b).TotalSeconds) < 2.0;
+        }
 
         /// <summary>邮件与界面显示用：优先用户起的名称，并带上进程名便于核对。</summary>
         public string Label
