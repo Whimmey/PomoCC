@@ -216,11 +216,11 @@ node .\tools\fake-smtp.mjs 2560 .\tests\e2e-message.txt .\tests\e2e-session.txt 
 .\dist\PomoCC-番茄钟监督.exe --mail-test .\tests\mailtest.log 127.0.0.1 2560
 ```
 
-### 已验证结果（9 项 exit code 全 0）
+### 已验证结果（正常交互式用户环境下 9 项 exit code 全 0）
 
 - `--dpicheck`：PerMonitorV2 生效；主窗口 ClientSize 575x725（= 460x580 × 1.25）；
   四个窗口布局零溢出。
-- `--selftest`：**61 项全通过**（0.1 时 18 项 → 0.2 加后台计时/实例/状态机 → Re-v0.2 加规则快照/原子写/协议边界），
+- `--selftest`：**62 项全通过**（0.1 时 18 项 → 0.2 加后台计时/实例/状态机 → Re-v0.2 加规则快照/原子写/协议边界），
   含旧配置迁移、逐条规则阈值边界、「名称」默认值等于「软件」列、自定义名称进入邮件正文、睡眠与未知长间隔、并发与竞态。
 - `--smoketest`：**22 项全通过**；设置窗口的规则表格为 **4 列 × 3 行**，
   列名「名称 / 软件 / 规则时长（分钟） / 操作」。
@@ -345,6 +345,24 @@ Re-v0.2 复审收尾新增（同样在 `SelfTest.cs`）：
 | `sleep-gap-with-running-process` / `long-gap-skips-unknown-sample` / `power-resume-resets-baseline` | 睡眠与未知长间隔不计入、也不补采样；Suspend/Resume 不重复累计 |
 | `smtp-rejects-wrong-three-digit-code` / `smtp-multiline-response` | 严格三位状态码、多行响应格式校验 |
 | `http-redirect-is-not-followed` / `http-auth-header-stays-on-original-request` | 不跟随重定向、认证头不外泄（用测试内置的迷你 HTTP 服务器验证） |
+| `dpapi-env-failure-classifier` | 「DPAPI 环境阻塞」与「真代码缺陷」的判定逻辑本身也被测到 |
+| `render-apppicker-has-accent` / `render-apppicker-button-state` | 主按钮按启用/禁用两种**正确**状态各自验证（列表为空时禁用是对的，不要求主色） |
+
+### 测试对环境的要求（DPAPI 与用户配置文件）
+
+`ProtectedData` 需要**已加载的用户配置文件**。在服务会话、无配置文件的账号、
+或被某些沙箱方式拉起的进程里，`Protect()` 会抛
+`CryptographicException：当前线程用户上下文未加载用户配置文件`。
+
+- 每个模式开头都会打印一行 `环境检查：DPAPI（需要已加载的用户配置文件）可用/不可用 —— 原因`；
+- 不可用时记 `[SKIP] env-dpapi-profile`，**与加密相关的检查跳过、其余检查照常跑完**
+  （以前 `secret-dpapi-roundtrip` 没有守卫，会让整个 `--selftest`/`--smoketest` 在这一行中断，
+  后面的检查全都不执行 —— 这种情况下的"通过"是假象，所以汇总行现在会明确写
+  `结果：通过，但有 N 项因环境阻塞跳过、未验证`）；
+- 环境阻塞的退出码仍然是 **0**（不是代码缺陷），靠日志里的 `[SKIP]` 行和汇总行区分；
+- **绝不为通过测试去改生产加密逻辑**（`Settings.Protect/Unprotect` 一个字都不动）；
+- 模拟用环境变量：`POMOCC_TEST_NO_DPAPI=1`（模拟 DPAPI 不可用）、
+  `POMOCC_TEST_EMPTY_APP_LIST=1`（模拟程序列表为空 → 主按钮禁用态渲染）。
 
 自检注入点：`Supervisor.Clock`（换假时钟）、`Supervisor.ProcessScan`（喂假进程表）、
 `Supervisor.ManualTickOnly`（不让后台线程推进）、`Store.RoamingRootOverride`（把 %APPDATA% 指到临时目录）。
