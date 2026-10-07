@@ -222,7 +222,7 @@ node .\tools\fake-smtp.mjs 2560 .\tests\e2e-message.txt .\tests\e2e-session.txt 
   四个窗口布局零溢出。
 - `--selftest`：**62 项全通过**（0.1 时 18 项 → 0.2 加后台计时/实例/状态机 → Re-v0.2 加规则快照/原子写/协议边界），
   含旧配置迁移、逐条规则阈值边界、「名称」默认值等于「软件」列、自定义名称进入邮件正文、睡眠与未知长间隔、并发与竞态。
-- `--smoketest`：**22 项全通过**；设置窗口的规则表格为 **4 列 × 3 行**，
+- `--smoketest`：**24 项全通过**；设置窗口的规则表格为 **4 列 × 3 行**，
   列名「名称 / 软件 / 规则时长（分钟） / 操作」。
 - `--realsmoke`：7 项全通过，注册表自启测试后恢复原状。
 - `--loadcheck`：直接加载用户真实的 `config.json`，解析成功、密码散列原样保留。
@@ -347,6 +347,7 @@ Re-v0.2 复审收尾新增（同样在 `SelfTest.cs`）：
 | `http-redirect-is-not-followed` / `http-auth-header-stays-on-original-request` | 不跟随重定向、认证头不外泄（用测试内置的迷你 HTTP 服务器验证） |
 | `dpapi-env-failure-classifier` | 「DPAPI 环境阻塞」与「真代码缺陷」的判定逻辑本身也被测到 |
 | `render-apppicker-has-accent` / `render-apppicker-button-state` | 主按钮按启用/禁用两种**正确**状态各自验证（列表为空时禁用是对的，不要求主色） |
+| `settings-sound-preview-link` / `settings-sound-preview-plays` | 设置里「提示音」三个字是可点链接（蓝字下划线，区域正好 3 个字），点了会播放 |
 
 ### 测试对环境的要求（DPAPI 与用户配置文件）
 
@@ -400,7 +401,13 @@ Re-v0.2 复审收尾新增（同样在 `SelfTest.cs`）：
   各实例的 `Seconds` 只用于显示；规则仍按 exe 汇总判定，符合表格逐行配置的语义。
 - **结果状态明确**：`SessionResult.Running/Completed/Abandoned/Violated` + 独立的 `ReportTriggered`。
   违规后走到结束仍是 `Violated`：不重复发信、不记成正常完成、也不触发完成提醒。
-- **专注走完的提醒**：`Supervisor.FinishLocked(true)` → `NotifyComplete()`：托盘气泡（走 `Notify` 事件）+ `SystemSounds.Asterisk`。
+- **专注走完的提醒**：`Supervisor.FinishLocked(true)` → `NotifyComplete()`：托盘气泡（走 `Notify` 事件）+ `Supervisor.PlayNotifySound()`。
+  提示音**只有一处实现**（`PlayNotifySound`，会累加 `SoundPlayCount`，`App.Headless` 时只计数不出声）：
+  真触发和设置里点「提示音」试听走的是同一个方法，所以试听到的就是真触发那一声；
+  试听链接是 `SettingsForm` 里 `chkSound`（文字「专注走完时播放」）旁边的 `LinkLabel`，
+  `LinkArea = (0,3)` 正好是「提示音」三个字，绑定的处理函数是 `OnSoundPreviewClicked`。
+  自检注意：`LinkLabel` 的命中判定基于**真实光标位置**，屏幕外窗口用合成鼠标消息点不到，
+  所以 `settings-sound-preview-plays` 是直接触发它绑定的那个处理函数（同一段代码）。
   两个开关 `Settings.NotifyOnComplete` / `NotifySound` 默认开，可在「规则与其他」页关掉。
   配置 **v1 → v2** 迁移要注意：老配置里没有这两个 bool 字段，反序列化后是 false（等于关），
   `Store.Normalize` 里按 `Version < 2` 显式补成 true，否则老用户升级后提醒会**静默失效**。
