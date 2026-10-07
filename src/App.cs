@@ -11,7 +11,7 @@ namespace PomoCC
     {
         /// <summary>产品名与版本（窗口标题、托盘提示、关于信息都用它）。</summary>
         public const string ProductName = "番茄钟监督";
-        public const string Version = "0.2";
+        public const string Version = "0.2.0";
 
         /// <summary>项目主页与作者（设置窗口左下角的署名链接用它）。</summary>
         public const string Author = "Whimmey";

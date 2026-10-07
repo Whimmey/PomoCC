@@ -5,8 +5,8 @@
 
 一个单文件 Windows 桌面小程序：番茄钟 + 监督程序进程监测 + 自动给监督人发告状邮件。
 
-- 当前版本：**0.2**（`App.Version` + `src/AssemblyInfo.cs` + README 的版本号；**产物文件名固定不带版本**，版本信息在 exe 属性里）
-- 交付物：[dist/PomoCC-番茄钟监督.exe](dist/PomoCC-番茄钟监督.exe)（约 150 KB）+ [dist/PomoCC-番茄钟监督.exe.config](dist/PomoCC-番茄钟监督.exe.config)
+- 当前版本：**0.2.0**（`App.Version` + `src/AssemblyInfo.cs` + README 的版本号；**产物文件名固定不带版本**，版本信息在 exe 属性里）
+- 发布交付物：`release/PomoCC-v0.2.0.zip`。ZIP 根目录包含主程序、同名 `.exe.config`、`uninstall.exe` 和 `使用说明.txt` 四个文件
 - 用户文档：[docs/使用说明.txt](docs/使用说明.txt)（构建时自动复制进 `dist/`）
 - 开源协议：Apache-2.0（[LICENSE](LICENSE)）
 - 需求来源：用户要求「有界面、双击能用的 Windows 小软件」，行为规则经用户确认并在后续反馈中细化：
@@ -29,7 +29,7 @@
 
 | 选择 | 原因 |
 |---|---|
-| C# WinForms + 系统自带 `csc.exe` | 目标机器只需 .NET Framework 4.x（Win10/11 自带），**零安装、零依赖**；产物约 117 KB |
+| C# WinForms + 系统自带 `csc.exe` | 目标机器只需 .NET Framework 4.x（Win10/11 自带），**零安装、零依赖**；主程序约 270 KB |
 | 自建视觉层（`Theme.cs` + `Ui.cs`） | 默认 WinForms 控件是十多年前的观感。圆角卡片、扁平圆角按钮、环形倒计时、扁平表格全部自绘，不引第三方 UI 库 |
 | 自己实现 SMTP（`SmtpTransport`） | .NET 自带的 `SmtpClient` **不支持 465 端口隐式 SSL**，而国内邮箱大量使用 465 |
 | 自己实现 DPI 缩放（`Dpi.cs`） | 框架的自动缩放在实测中被叠加了两次，结果不可预测（见下文） |
@@ -50,6 +50,7 @@ PomodoroSupervisor/
 │  ├─ Theme.cs               配色、字体、圆角常量（设计像素基准 96 DPI）
 │  ├─ Ui.cs                  视觉控件库：FlatButton / Card / InputBox / NumberBox / TimerDial / 表格样式
 │  ├─ Dpi.cs                 按真实 DPI 缩放控件树（含跨显示器 DPI 变化）
+│  ├─ IconArt.cs             番茄图标绘制（运行时托盘图标 + 构建时 exe 图标共用）
 │  ├─ Settings.cs            设置模型、WatchRule 规则表（含「名称」）、DPAPI、密码散列、校验
 │  ├─ Store.cs               数据目录、设置/统计/告状记录持久化、日志、旧配置迁移
 │  ├─ Monitor.cs             按规则枚举受监视进程 + 启动时间 + 命中的规则
@@ -67,17 +68,24 @@ PomodoroSupervisor/
 │  ├─ app.manifest           DPI 感知声明（PerMonitorV2）
 │  ├─ app.config             刻意留空，仅用于覆盖旧版 exe.config（见下文）
 │  └─ SelfTest.cs            自检 / 界面冒烟 / 真实模式 / DPI / 配置兼容 / 发信测试
+├─ uninstaller/              独立卸载程序源码（单独编译，避免进入主程序）
+│  ├─ Program.cs
+│  └─ AssemblyInfo.cs.template  版本/产品信息模板，%VERSION% 与 %INFORMATIONAL% 由 build.ps1 填（见「构建」）
 ├─ CHANGELOG.md              版本更新说明
 ├─ tools/fake-smtp.mjs       端到端测试用的假 SMTP 服务器（Node）
+├─ tools/IconGenerator.cs    构建时生成临时多尺寸 ICO，不进入 dist/
 ├─ docs/
 │  ├─ 使用说明.txt            面向最终用户的说明（构建时复制到 dist/）
-│  ├─ 开发修复任务.md         0.2 那一轮的任务清单（历史记录，留档）
+│  ├─ 开发修复任务.md         0.2.0 那一轮的任务清单（历史记录，留档）
 │  └─ images/                README 顶部那张主界面截图（入库，别被 .gitignore 掉）
 ├─ tests/                    自检输出（日志/截图），**不入库**，只留 .gitkeep
-└─ dist/                     构建产物，**不入库**（发布走 GitHub Releases）
+├─ dist/                     构建产物，**不入库**
    ├─ PomoCC-番茄钟监督.exe
    ├─ PomoCC-番茄钟监督.exe.config
+   ├─ uninstall.exe
    └─ 使用说明.txt            ← 由 build.ps1 从 docs/ 复制
+└─ release/                  GitHub Release 上传包，**不入库**
+   └─ PomoCC-v0.2.0.zip      ← 根目录严格只含 dist/ 的上述四个文件
 ```
 
 ### 入库范围（.gitignore 的取舍）
@@ -87,6 +95,7 @@ PomodoroSupervisor/
 | `src/`、`build.ps1`、`exe-name.txt`、`docs/`、`tools/fake-smtp.mjs` | 源码、构建脚本、用户文档、测试工具 |
 | `README.md`（给用户）、`AGENTS.md`（给开发者）、`LICENSE` | 仓库门面与开发笔记 |
 | 不入库 `dist/` | 构建产物，二进制走 Releases |
+| 不入库 `release/` | 自动生成的版本 ZIP，作为 GitHub Release 附件上传 |
 | 不入库 `tests/*` | 只有运行产物（日志、截图、假 SMTP 抓包）；源码级自检在 `src/SelfTest.cs` |
 | 不入库 `config.json` / `stats.json` / `history.jsonl` / `app.log` | **隐私**：含告状记录全文、密码散列、DPAPI 加密的邮箱授权码 |
 
@@ -107,6 +116,42 @@ pwsh -File .\build.ps1
 （当前 `exe-name.txt` 里**故意没有**用 `%VERSION%`：文件名固定成 `PomoCC-番茄钟监督.exe`，
 这样注册表里的开机自启路径跨版本始终有效，不用每次发版都去改它。版本信息在 exe 属性里。）
 `$env:PS_EXE_NAME` 可临时覆盖整个名字（正式 exe 被占用时构建 dev 版用）。
+
+构建成功后还会自动生成 `release/PomoCC-vx.y.z.zip`。ZIP 文件名的版本号取自
+`AssemblyVersion` 的前三段，压缩包根目录严格只允许上述四个交付文件；构建脚本会在结束前
+重新打开 ZIP 校验条目数量和文件名，防止把源码、测试日志或其他本地文件带进发布包。
+
+两个 exe 的版本号只有一个来源：`src/AssemblyInfo.cs`。卸载器的信息放在
+`uninstaller/AssemblyInfo.cs.template`，构建时替换两个占位符后再编译：
+
+| 占位符 | 取自 | 用在卸载器的 |
+|---|---|---|
+| `%VERSION%` | `AssemblyVersion` 前三段（`0.2.0`） | `AssemblyVersion` / `AssemblyFileVersion` |
+| `%INFORMATIONAL%` | `AssemblyInformationalVersion`（`0.2.0`） | `AssemblyInformationalVersion`，即资源管理器里的**产品版本** |
+
+**「产品版本」必须取 `AssemblyInformationalVersion`，不能取 `AssemblyVersion`。**
+早先就是取了后者，于是主程序显示 `0.2`、卸载程序显示 `0.2.0`（文件版本都是 `0.2.0.0`，
+功能没问题，但不满足"完全一致"）。现在两个 exe 分别是：产品版本 `0.2.0`、文件版本 `0.2.0.0`。
+
+构建用的临时文件（图标生成器 exe、生成的 ico、卸载器的临时 AssemblyInfo 源码）这样兜底：
+图标生成阶段自带 `try/catch/finally`；**从主程序编译开始，到 `exe.config` 复制、卸载器源码与模板检查、
+模板读取、临时源码写入、卸载器编译为止，全部在同一个 `try/finally` 里**，退出时删掉 ico 与临时源码。
+因此"模板缺失 / 模板读取失败 / 临时源码只写了一半"这些**都在清理范围内**
+（早先这几步在 `try` 之前，失败会留下 ico 或半写入的临时源码）。成功走到这两步之后已经没有临时文件，
+后面的复制文档、打 ZIP 阶段再失败也不会留下东西。
+
+清理逻辑的验证方式：**变异验证**——故意让某一环失败，构建必须如实失败、`%TEMP%` 残留必须为 0，
+跑完还要按 SHA256 确认被改的文件原样恢复。当前三条（都在"一个大 `try/finally`"的新结构上跑过）：
+
+| 变异 | 失败点 | 结果 |
+|---|---|---|
+| 图标目录条目故意声明 24bpp | 图标自校验 | 构建失败（`icon self-check failed`），残留 0 |
+| 删掉 `uninstaller/AssemblyInfo.cs.template` | 模板检查（临时源码写入**之前**） | 构建失败（`Missing uninstaller info template`），残留 0 |
+| 在 `uninstaller/Program.cs` 插 `#error MUTATION` | 卸载器编译（此时临时 `.cs` **已经写好**） | 构建失败（`Uninstaller compile failed`），残留 0 |
+
+**别拿"把 `app.manifest` 改名"当清理验证**：那一步在所有临时文件产生**之前**就失败了，
+证明不了清理逻辑（早先我拿它当证据，等于没测）。唯一覆盖不到的失败是硬杀进程（Ctrl+C / taskkill），
+那种情况什么 `finally` 都跑不到。
 
 ## 监督规则表
 
@@ -292,6 +337,27 @@ node .\tools\fake-smtp.mjs 2560 .\tests\e2e-message.txt .\tests\e2e-session.txt 
     对这个页面所有按钮行都生效（监督名单 / 邮件设置 / 内容自定义 / 规则与其他）。
     新增断言 `settings-content-buttons-uniform`（等高、同 Top、上下外边距 > 0、
     行高只留给外边距），实测量到 `高度 48/48、Top 8/8、上/下外边距 8/10px、行高 66`。
+18. **exe 内嵌图标颜色全错（发布前审查发现）**：`tools/IconGenerator.cs` 原来用
+    `Bitmap.GetHicon()` + `Icon.FromHandle(...).Save(...)` 拿帧数据 —— 这条路径把帧**降成
+    4 位色并丢掉 alpha**，而 `WriteIcon` 仍按 32bpp 写 ICO 目录条目。于是 exe 图标渲染出来是
+    纯红 + 灰（品牌红 `#E24A3D` 变 `255,0,0`、叶子绿 `#489648` 变 `128,128,128`）。
+    直接解码残留的 ico 证实：目录声明 32bpp，帧头 `biBitCount` 却是 **4**。
+    修法：不再走 HICON，**自己编码帧** —— ≤64 用 32bpp BMP（BITMAPINFOHEADER + 自下而上 BGRA +
+    1bpp AND 掩码），≥128 用 PNG；并让生成器**写完自己读回来校验**
+    （32×32 帧必须声明且实际是 32bpp，且同时找得到品牌红与叶子绿），不满足就返回非 0，
+    构建随之失败。变异验证：把目录条目故意写成 24bpp，构建如实报
+    `icon self-check failed: 32x32 frame declares 24bpp`。
+    修复后取样 exe 图标：品牌红 357 px、叶子绿 80 px ✓。
+19. **卸载器"产品版本"取错来源 + 临时文件清理有漏（复审指出；两条都不阻塞发布）**：
+    ① 卸载器的 `AssemblyInformationalVersion` 取自 `AssemblyVersion` 的前三段，于是主程序的
+    「产品版本」是 `0.2`、卸载程序是 `0.2.0` —— 文档里"两个 exe 版本完全一致"的说法不成立。
+    现在模板分两个占位符：`%VERSION%`（→ AssemblyVersion/FileVersion）与
+    `%INFORMATIONAL%`（→ AssemblyInformationalVersion），各自对应主程序里的那个字段，
+    `0.2` 与 `0.2.0` 这种错位不会再出现。
+    ② 当时卸载器模板的检查、读取与临时源码写入发生在 `try/finally` **之前**，这几步一失败就会
+    留下已生成的 ico 或半写入的临时源码，所以文档里"失败路径全部清理"同样说过头了。
+    现在从主程序编译到卸载器编译是一个 `try/finally`，统一清理。
+    **教训**：写"全都/完全一致"这种话之前，先把每条路径数一遍再写。
 
 ### 开发期残留自查（每次交付前跑一遍）
 
@@ -331,7 +397,7 @@ node .\tools\fake-smtp.mjs 2560 .\tests\e2e-message.txt .\tests\e2e-session.txt 
 - `--shot`：把每个窗口渲染成 PNG，我逐张看过再交付；
 - `--rendertest`：把按钮/整窗渲染到位图后数像素（背景是否擦净、有没有未绘制区域、文字有没有被截断）。
 
-## 0.2 监督核心的验收测试（改这些代码前先看）
+## 0.2.0 监督核心的验收测试（改这些代码前先看）
 
 任务清单在 `docs/开发修复任务.md`，对应断言（全部在 `SelfTest.cs`，都用临时目录/假时钟/假进程表，可重复跑）：
 

@@ -291,16 +291,7 @@ namespace PomoCC
                 {
                     g.SmoothingMode = SmoothingMode.AntiAlias;
                     g.Clear(Color.Transparent);
-                    using (SolidBrush body = new SolidBrush(Theme.Accent))
-                    {
-                        g.FillEllipse(body, 4, 9, 24, 20);
-                    }
-                    using (SolidBrush leaf = new SolidBrush(Color.FromArgb(72, 150, 72)))
-                    {
-                        g.FillEllipse(leaf, 12, 3, 9, 7);
-                        g.FillEllipse(leaf, 8, 6, 7, 5);
-                        g.FillEllipse(leaf, 18, 6, 7, 5);
-                    }
+                    IconArt.DrawTomato(g, 32);
                 }
                 IntPtr h = bmp.GetHicon();
                 try

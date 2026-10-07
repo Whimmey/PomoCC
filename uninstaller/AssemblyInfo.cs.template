@@ -1,0 +1,16 @@
+using System.Reflection;
+
+// 卸载程序的版本/产品信息。版本号不写死在这里，由 build.ps1 从 src\AssemblyInfo.cs 里读出来替换：
+//   %VERSION%       = AssemblyVersion 的前三段（0.2.0）→ 用于 AssemblyVersion / AssemblyFileVersion
+//   %INFORMATIONAL% = AssemblyInformationalVersion（0.2.0）→ 用于 AssemblyInformationalVersion，
+//                     也就是资源管理器里显示的「产品版本」。
+// 两者都必须来自主程序那一份，否则会出现"主程序 0.2、卸载程序 0.2.0"这种不一致
+// （之前就是这样：卸载器的产品版本取自 AssemblyVersion，而不是 InformationalVersion）。
+[assembly: AssemblyTitle("PomoCC 卸载程序")]
+[assembly: AssemblyDescription("卸载 PomoCC-番茄钟监督：清理程序文件、开机自启项与本机数据")]
+[assembly: AssemblyProduct("PomoCC")]
+[assembly: AssemblyCompany("Whimmey")]
+[assembly: AssemblyCopyright("Copyright (C) 2026 Whimmey")]
+[assembly: AssemblyVersion("%VERSION%.0")]
+[assembly: AssemblyFileVersion("%VERSION%.0")]
+[assembly: AssemblyInformationalVersion("%INFORMATIONAL%")]

@@ -1,19 +1,20 @@
 # 🍅 PomoCC · 番茄钟监督
 
-> 没坚持完专注？偷偷玩游戏？它会给你的监督人发一封告状邮件。
-
-**Focus, or I CC (emails) your supervisor. —— Windows 桌面番茄钟 + 监督名单进程监测 + 自动告状邮件。**
-单文件 `exe`（约 150 KB），不需要安装、不需要 .NET SDK、不引任何第三方库 —— 用 Windows 自带的 .NET Framework 编译器直接产出。
-
 <p>
-  <img alt="version" src="https://img.shields.io/badge/version-0.2-blue">
+  <img alt="version" src="https://img.shields.io/badge/version-0.2.0-blue">
   <img alt="license" src="https://img.shields.io/badge/license-Apache--2.0-green">
   <img alt="platform" src="https://img.shields.io/badge/platform-Windows%2010%2F11-lightgrey">
   <img alt="runtime" src="https://img.shields.io/badge/.NET%20Framework-4.x%20(built--in)-purple">
-  <img alt="dependencies" src="https://img.shields.io/badge/dependencies-none-brightgreen">
 </p>
 
-![主界面](docs/images/main-idle.png)
+> 没坚持完专注？偷偷玩游戏？它会给你的监督人发一封告状邮件。
+
+**Focus, or I CC (emails) your supervisor. —— Windows 桌面番茄钟 + 监督名单进程监测 + 自动告状邮件。**
+单文件 `exe`（约 270 KB），不需要安装、不需要 .NET SDK、不引任何第三方库 —— 用 Windows 自带的 .NET Framework 编译器直接产出。
+
+> 📘 **技术实现与安全设计：** [阅读 TechnicalDetails.md](TechnicalDetails.md)，了解计时模型、进程判定、数据持久化、网络安全与卸载边界。
+
+<img src="docs/images/main-idle.png" alt="主界面" width="40%">
 
 ---
 
@@ -72,8 +73,8 @@
 
 ## 下载与使用
 
-1. 到 [Releases](../../releases) 下载 **`PomoCC-番茄钟监督.exe`** 和同名的 **`.exe.config`**
-   （文件名固定、不随版本变化，所以升级时直接覆盖同名文件即可，注册表里的开机自启路径也不用改；两个文件必须放在同一个目录里，`.config` 是用来关掉框架自动 DPI 缩放的，删了界面会糊）
+1. 到 [Releases](../../releases) 下载 **`PomoCC-vx.y.z.zip`**，完整解压到任意普通文件夹（不要直接在压缩包预览窗口里运行）
+   （内部程序文件名固定、不随版本变化，所以升级时先退出程序，再把新版压缩包解压并覆盖原目录即可；`.exe.config` 必须和主程序放在同一个目录里，删了界面会糊）
 2. 双击运行。首次运行会让你设一个「退出 / 打开设置」用的密码 —— **记牢，忘了只能删配置重来**
 3. 进「设置 → 邮件设置」填监督人邮箱和发件邮箱（见下一节）
 4. 回主界面点「开始专注」
@@ -81,8 +82,7 @@
 > 仓库目前还没有 Release 包，你也可以按下面的「从源码构建」自己编译，一分钟出结果。
 
 **它是绿色软件：** 不写系统目录、不装服务、不加驱动。
-卸载 = 删掉 exe 目录，再删掉数据目录 `%APPDATA%\PomoCC\`；
-如果开过开机自启，在设置里关掉即可（它会删掉注册表里 `HKCU\...\Run\PomoCC` 这一项）。
+卸载时运行同目录的 **`uninstall.exe`**，确认后会删除程序、开机自启项（本程序注册表信息），以及本机保存的所有设置、邮箱授权码、统计数据、告状历史和日志。删除后无法恢复。**如果只是升级，请直接把下载的目录覆盖进来，不需要运行卸载程序。**
 
 ## 📧 配置发信邮箱
 
@@ -120,19 +120,28 @@ pwsh -File .\build.ps1
 # 或 Windows PowerShell： powershell -File .\build.ps1
 ```
 
-产物在 `dist\`：
+可直接运行的四个文件在 `dist\`：
 
 ```
-dist\PomoCC-番茄钟监督.exe          ← 单文件程序（约 150 KB）
+dist\PomoCC-番茄钟监督.exe          ← 单文件程序（约 270 KB）
 dist\PomoCC-番茄钟监督.exe.config   ← 必须与 exe 放在一起
+dist\uninstall.exe                  ← 确认后清理程序、自启项和本机数据
 dist\使用说明.txt            ← 面向非技术用户的图文说明
 ```
+
+同时会在 `release\` 生成可直接上传到 GitHub Releases 的版本压缩包：
+
+```text
+release\PomoCC-v0.2.0.zip
+```
+
+ZIP 根目录严格只包含上述四个文件，用户完整解压后即可运行。
 
 几个刻意为之的设计：
 
 | 设计 | 原因 |
 |---|---|
-| 用系统自带的 `C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe` 直接编译 | 目标机器零安装、零依赖；产物小到 150 KB |
+| 用系统自带的 `C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe` 直接编译 | 目标机器零安装、零依赖；主程序约 270 KB |
 | 全部界面控件自绘（`Theme.cs` + `Ui.cs`） | 默认 WinForms 控件是十多年前的观感；不引第三方 UI 库 |
 | 自己实现 SMTP 客户端（`SmtpTransport.cs`） | .NET 自带的 `SmtpClient` **不支持 465 端口隐式 SSL**，而国内邮箱大量使用 465 |
 | 自己做 DPI 缩放（`Dpi.cs` + `app.manifest`） | 框架的自动缩放在实测里被叠加了两次，结果不可预测 |
@@ -200,6 +209,7 @@ PomoCC/
 │  ├─ App.cs                 入口、单实例互斥、命令行模式、开机自启
 │  ├─ Theme.cs / Ui.cs       配色字体 + 自绘控件库（按钮/卡片/输入框/环形倒计时）
 │  ├─ Dpi.cs                 自己的 DPI 缩放
+│  ├─ IconArt.cs             番茄图标绘制（托盘图标和 exe 图标共用）
 │  ├─ Settings.cs / Store.cs 设置模型、持久化、DPAPI、密码散列、旧配置迁移
 │  ├─ Monitor.cs             按规则枚举受监视进程
 │  ├─ AppCatalog.cs          枚举本机正在运行的程序（图标/描述/窗口标题）
@@ -209,24 +219,18 @@ PomoCC/
 │  ├─ HttpSender.cs          Resend / SendGrid / Brevo / 自定义 HTTP
 │  ├─ MainForm.cs / SettingsForm.cs / AppPickerForm.cs / Dialogs.cs   界面
 │  └─ SelfTest.cs            全部自检
+├─ uninstaller/
+│  └─ Program.cs             独立卸载程序源码
 ├─ docs/
 │  ├─ 使用说明.txt            面向非技术用户的说明（构建时会复制到 dist/）
 │  └─ images/                README 用的截图
 ├─ tools/fake-smtp.mjs       端到端测试用的假 SMTP 服务器（Node）
+├─ tools/IconGenerator.cs    构建时生成临时多尺寸 ICO，不进入 dist/
 └─ tests/                    自检输出（日志/截图），不入库
 ```
 
-## 参与贡献
-
-欢迎提 Issue 和 PR。动手改代码前建议先看 [`AGENTS.md`](AGENTS.md)（开发笔记与踩坑记录），
-提交前请把你改动的部分对应的自检跑一遍（至少 `--selftest`、`--dpicheck`、`--rendertest`）。
-
-## 📄 许可证
-
-[Apache License 2.0](LICENSE)
-
 ---
 
-**版本 0.2** —— 监督核心改为独立后台计时（界面卡住不再少算专注时间）、正确处理睡眠/休眠，
+**版本 0.2.0** —— 监督核心改为独立后台计时（界面卡住不再少算专注时间）、正确处理睡眠/休眠，
 进程按「PID + 启动时间」识别实例、规则按 exe 汇总；发信入口加了地址校验与连接超时，
 手动测试/重发改到后台线程，数据迁移失败可重试。详见 [CHANGELOG.md](CHANGELOG.md)。

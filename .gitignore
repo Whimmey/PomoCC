@@ -6,6 +6,7 @@
 # dist/ 完全由 build.ps1 生成（exe、exe.config、用户说明的副本）。
 # 发布走 GitHub Releases，二进制不入库。
 /dist/
+/release/
 
 # 兜底：任何地方都别提交二进制
 *.exe
