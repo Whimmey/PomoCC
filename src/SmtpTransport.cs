@@ -24,12 +24,28 @@ namespace PomoCC
         private static void Connect(TcpClient client, string host, int port, int timeoutMs)
         {
             IAsyncResult ar = client.BeginConnect(host, port, null, null);
-            if (!ar.AsyncWaitHandle.WaitOne(timeoutMs, false))
+            try
             {
-                try { client.Close(); } catch { }
-                throw new IOException(string.Format("连接 {0}:{1} 超时（{2} 秒没连上）", host, port, timeoutMs / 1000));
+                if (!ar.AsyncWaitHandle.WaitOne(timeoutMs, false))
+                {
+                    try { client.Close(); } catch { }
+                    throw new IOException(string.Format("连接 {0}:{1} 超时（{2} 秒没连上）", host, port, timeoutMs / 1000));
+                }
+                try
+                {
+                    client.EndConnect(ar);      // 连接被拒等错误在这里抛出
+                }
+                catch (Exception ex)
+                {
+                    // 统一转成可读错误（含目标地址），不要把 SocketException 直接抛给用户
+                    throw new IOException(string.Format("连接 {0}:{1} 失败：{2}", host, port, ex.Message));
+                }
             }
-            client.EndConnect(ar);      // 连接被拒等错误在这里抛出
+            finally
+            {
+                // 连接结束（无论成败）都要释放句柄，别把等待句柄泄漏出去
+                try { ar.AsyncWaitHandle.Close(); } catch { }
+            }
         }
 
         /// <summary>协议边界校验：不能只依赖设置界面，直接调用发送入口也必须拦住。</summary>
@@ -203,7 +219,7 @@ namespace PomoCC
         }
 
         /// <summary>一次会话；按字节逐行读取，避免缓冲吃掉 STARTTLS 之后的握手数据。</summary>
-        private class SmtpSession
+        internal class SmtpSession        // internal：自检可以直接喂假响应验证状态码判断
         {
             public readonly Stream Stream;
             private readonly byte[] crlf = new byte[] { 13, 10 };
@@ -213,6 +229,10 @@ namespace PomoCC
 
             public string LastResponse { get { return lastResponse; } }
 
+            /// <summary>
+            /// 读一条（可能多行的）SMTP 响应，并**严格比较完整的三位状态码**。
+            /// 只比第一位是不够的：例如等 250 时收到 220 会被误判成成功。
+            /// </summary>
             public string ReadResponse(int expectCode, string what)
             {
                 StringBuilder sb = new StringBuilder();
@@ -223,17 +243,32 @@ namespace PomoCC
                     if (line == null)
                         throw new IOException(string.Format("在等待「{0}」时连接被服务器关闭。已收到：{1}", what, sb.ToString().Trim()));
                     sb.Append(line).Append('\n');
-                    if (line.Length >= 3)
-                    {
-                        if (firstCode == null) firstCode = line.Substring(0, 3);
-                        if (line.Length == 3 || line[3] == ' ') break;
-                    }
-                    else break;
+
+                    // 多行响应的每一行都必须是「三位状态码 + 分隔符」的格式
+                    if (line.Length < 3 || !IsThreeDigits(line.Substring(0, 3)))
+                        throw new IOException(string.Format("服务器对「{0}」的响应格式不对：{1}", what, line.Trim()));
+
+                    if (firstCode == null) firstCode = line.Substring(0, 3);
+                    if (line.Length == 3 || line[3] == ' ') break;      // 最后一行
+                    if (line[3] != '-')
+                        throw new IOException(string.Format("服务器对「{0}」的响应格式不对：{1}", what, line.Trim()));
                 }
                 lastResponse = sb.ToString();
-                if (firstCode == null || firstCode[0] != char.Parse(expectCode.ToString().Substring(0, 1)))
-                    throw new IOException(string.Format("服务器拒绝了「{0}」：{1}", what, lastResponse.Trim()));
+
+                string expect = expectCode.ToString();
+                if (firstCode != expect)
+                {
+                    throw new IOException(string.Format("「{0}」期望服务器返回 {1}，实际返回 {2}：{3}",
+                        what, expect, firstCode, lastResponse.Trim()));
+                }
                 return lastResponse;
+            }
+
+            private static bool IsThreeDigits(string s)
+            {
+                if (s == null || s.Length != 3) return false;
+                for (int i = 0; i < 3; i++) if (s[i] < '0' || s[i] > '9') return false;
+                return true;
             }
 
             public string Command(string cmd, int expectCode)

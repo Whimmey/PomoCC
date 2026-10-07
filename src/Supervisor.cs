@@ -41,6 +41,11 @@ namespace PomoCC
         public List<string> Events { get; set; }
         /// <summary>本段专注固定使用的配置快照，避免后台读到一半更新的配置。</summary>
         public Settings Snapshot { get; set; }
+        /// <summary>
+        /// 本段专注固定使用的**活动规则**快照。
+        /// 设置窗口在专注期间改了规则只影响下一段 —— 这一段继续用开始时的规则。
+        /// </summary>
+        public List<WatchRule> RuleSnapshot { get; set; }
         /// <summary>后台线程只碰这些字段，界面通过 Supervisor.Snapshot() 读。</summary>
         internal double ElapsedAcc;
         internal double LastMarkSeconds;
@@ -136,6 +141,57 @@ namespace PomoCC
             lock (gate) { watchRules = SettingsValidator.ActiveRules(Settings); }
         }
 
+        /// <summary>
+        /// 统一的应用设置入口（界面不许直接写 Settings / Stats）。
+        ///
+        /// · 专注中也能保存，但**本段 session 继续用它开始时的规则与计划时间**，新设置下一段生效；
+        /// · 统计与磁盘上的当天计数做"取较大值"合并，绝不把内存里正在累计的计数覆盖掉。
+        /// </summary>
+        public void ApplySettings(Settings settings)
+        {
+            if (settings == null) return;
+            lock (gate)
+            {
+                Settings = settings;
+                watchRules = SettingsValidator.ActiveRules(Settings);
+
+                DailyStats disk = null;
+                try { disk = Store.LoadToday(); }
+                catch { }
+                MergeStatsLocked(disk);
+
+                Queue(Raise);
+            }
+            FlushPending();
+        }
+
+        /// <summary>合并磁盘上的当天统计：只补高不覆盖，保证内存里正在累计的计数不丢。</summary>
+        private void MergeStatsLocked(DailyStats disk)
+        {
+            if (disk == null) return;
+            if (Stats == null) { Stats = disk; return; }
+            if (disk.Date != Stats.Date) return;          // 跨天：不动内存里的这一天
+            Stats.CompletedCount = Math.Max(Stats.CompletedCount, disk.CompletedCount);
+            Stats.AbandonedCount = Math.Max(Stats.AbandonedCount, disk.AbandonedCount);
+            Stats.ReportCount = Math.Max(Stats.ReportCount, disk.ReportCount);
+            Stats.FocusSeconds = Math.Max(Stats.FocusSeconds, disk.FocusSeconds);
+            Stats.ViolationSeconds = Math.Max(Stats.ViolationSeconds, disk.ViolationSeconds);
+        }
+
+        /// <summary>本段 session 正在使用的规则快照（只读副本，供自检与界面展示）。</summary>
+        public List<WatchRule> SessionRules
+        {
+            get
+            {
+                lock (gate)
+                {
+                    List<WatchRule> list = new List<WatchRule>();
+                    if (Session != null && Session.RuleSnapshot != null) list.AddRange(Session.RuleSnapshot);
+                    return list;
+                }
+            }
+        }
+
         public List<WatchRule> WatchRules { get { lock (gate) { return new List<WatchRule>(watchRules); } } }
 
         public List<string> WatchNames
@@ -198,15 +254,16 @@ namespace PomoCC
                 FocusSession s = new FocusSession();
                 s.StartedAt = Clock.Now;
                 s.Snapshot = Settings.Copy();                 // 本段专注固定配置
+                s.RuleSnapshot = SettingsValidator.ActiveRules(s.Snapshot);   // 本段专用规则（副本）
                 s.PlannedSeconds = s.Snapshot.FocusMinutes * 60;
                 s.LastMarkSeconds = Clock.Seconds;
                 s.LastSampleSeconds = Clock.Seconds;
                 s.Events.Add(string.Format("{0:HH:mm:ss} 开始专注，目标 {1} 分钟，监督 {2} 个程序",
-                    Clock.Now, s.Snapshot.FocusMinutes, watchRules.Count));
+                    Clock.Now, s.Snapshot.FocusMinutes, s.RuleSnapshot.Count));
                 Session = s;
 
                 Store.Log(string.Format("开始专注：{0} 分钟，监督 {1} 个程序",
-                    s.Snapshot.FocusMinutes, watchRules.Count));
+                    s.Snapshot.FocusMinutes, s.RuleSnapshot.Count));
                 Queue(Raise);
             }
             FlushPending();
@@ -232,16 +289,18 @@ namespace PomoCC
 
             if (delta > SleepGapSeconds)
             {
-                // 睡眠/休眠/被挂起：这一段时间不算专注，避免"睡一觉就完成"
-                s.Events.Add(string.Format("{0:HH:mm:ss} 检测到中断 {1:0} 秒（可能睡眠），本段不计时",
+                // 睡眠/休眠/被挂起（或电源事件丢失、线程恢复延迟）：
+                // 这段时间既不算专注，**也不采样** —— 否则会把未知的长时间算成
+                // 监督程序的运行时间，可能直接导致误判违规。
+                s.Events.Add(string.Format("{0:HH:mm:ss} 检测到中断 {1:0} 秒（可能睡眠），本段不计时、不采样",
                     Clock.Now, delta));
-                Store.Log(string.Format("检测到计时中断 {0:0} 秒，不计入专注", delta));
+                Store.Log(string.Format("检测到计时中断 {0:0} 秒：不计入专注，并跳过本次采样", delta));
+                s.LastSampleSeconds = nowSec;         // 重置采样基准，下一轮从零开始
+                return;
             }
-            else
-            {
-                s.ElapsedAcc += delta;
-                s.ElapsedSeconds = (int)Math.Round(s.ElapsedAcc);
-            }
+
+            s.ElapsedAcc += delta;
+            s.ElapsedSeconds = (int)Math.Round(s.ElapsedAcc);
 
             if (nowSec - s.LastSampleSeconds >= s.Snapshot.SampleSeconds)
             {
@@ -259,15 +318,16 @@ namespace PomoCC
             }
         }
 
-        /// <summary>采样：按实例累计，按 exe 汇总判断规则。</summary>
+        /// <summary>采样：按实例累计，按 exe 汇总判断规则。用的是**本段 session 的规则快照**。</summary>
         private void DoSampleLocked(FocusSession s, double nowSec)
         {
-            if (watchRules.Count == 0) return;
+            List<WatchRule> rules = s.RuleSnapshot;
+            if (rules == null || rules.Count == 0) return;
 
             double gap = nowSec - s.LastSampleSeconds;
             if (gap <= 0 || gap > s.Snapshot.SampleSeconds * 3) gap = s.Snapshot.SampleSeconds;
 
-            List<WatchProcess> running = ProcessScan(watchRules);
+            List<WatchProcess> running = ProcessScan(rules);
             // 同一个 exe 同时跑多个实例时，**这一轮采样只给它的规则预算累加一次**（按墙上时间），
             // 否则开两个实例会让"允许玩多久"的预算被双倍消耗。
             // 每个实例自己的运行时长仍然各自累计，仅用于显示。

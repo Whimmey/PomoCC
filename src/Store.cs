@@ -81,17 +81,39 @@ namespace PomoCC
 
         /// <summary>
         /// 数据目录改名：%APPDATA%\PomodoroSupervisor → %APPDATA%\PomoCC。
-        /// 步骤：复制（不覆盖新目录里已有的文件）→ 验证新配置能反序列化 → 写标记 → 删旧目录。
-        /// 任何一步失败都不写标记，下次启动继续；旧目录只在全部成功后才删。
+        ///
+        /// 可靠的迁移顺序（任何一步失败都不写标记，下次启动继续）：
+        ///   1. 每个文件先复制成 `xxx.migrating`，**验证内容**（配置/统计能反序列化、
+        ///      历史逐行可解析、日志存在）后再原子落位 —— 绝不直接写正式文件；
+        ///   2. 目标文件已存在但**验证不过**（上次复制被中断留下的残缺文件）→ 重新复制；
+        ///   3. 标记必须写入成功**并读得回来**，才允许删旧目录；
+        ///   4. 旧目录删不掉只记日志（下次启动会再试），不影响数据安全。
         /// </summary>
         internal static void MigrateLegacyData(string newDir)
         {
             try
             {
                 string marker = Path.Combine(newDir, MigrateMarkerName);
-                if (File.Exists(marker)) return;                        // 已经迁移过
-
                 string oldDir = Path.Combine(RoamingRoot, LegacyDataFolderName);
+
+                if (File.Exists(marker))
+                {
+                    // 已经迁移完成：如果旧目录还在（上次删失败），这里补删一次
+                    if (Directory.Exists(oldDir))
+                    {
+                        try
+                        {
+                            Directory.Delete(oldDir, true);
+                            AppendLogDirect(newDir, "已清理迁移残留的旧数据目录 " + LegacyDataFolderName);
+                        }
+                        catch (Exception ex)
+                        {
+                            AppendLogDirect(newDir, "旧数据目录删除失败，下次启动再试：" + ex.Message);
+                        }
+                    }
+                    return;
+                }
+
                 if (!Directory.Exists(oldDir))
                 {
                     WriteMigrateMarker(marker, "没有旧目录，无需迁移");
@@ -99,7 +121,8 @@ namespace PomoCC
                 }
                 if (!File.Exists(Path.Combine(oldDir, ConfigFileName)))
                 {
-                    WriteMigrateMarker(marker, "旧目录里没有配置，无需迁移");
+                    if (!WriteMigrateMarker(marker, "旧目录里没有配置，无需迁移")) return;
+                    try { Directory.Delete(oldDir, true); } catch { }
                     return;
                 }
 
@@ -110,49 +133,154 @@ namespace PomoCC
                     string src = Path.Combine(oldDir, files[i]);
                     string dst = Path.Combine(newDir, files[i]);
                     if (!File.Exists(src)) continue;
-                    if (File.Exists(dst)) continue;                     // 新目录已有这个文件：绝不覆盖
-                    File.Copy(src, dst, false);                         // 失败会抛 → 不写标记 → 下次重试
+
+                    // 目标已有而且内容有效 → 说明是用户自己的（或上次已搬好），绝不覆盖
+                    if (File.Exists(dst) && ValidateMigratedFile(files[i], dst)) continue;
+
+                    string tmp = dst + ".migrating";
+                    TryDelete(tmp);
+                    File.Copy(src, tmp, true);                       // 失败会抛 → 不写标记 → 下次重试
+                    if (!ValidateMigratedFile(files[i], tmp))
+                    {
+                        TryDelete(tmp);                              // 复制不完整：不落位，保留旧目录
+                        return;
+                    }
+                    if (File.Exists(dst)) TryDelete(dst);            // 目标损坏：删掉残缺文件后再落位
+                    File.Move(tmp, dst);
                     copied++;
                 }
 
-                // 复制完再验证配置真的能反序列化（读不出来就不算迁移成功）
-                string cfg = Path.Combine(newDir, ConfigFileName);
-                if (File.Exists(cfg))
-                {
-                    string text = File.ReadAllText(cfg, Encoding.UTF8);
-                    if (text.Trim().Length == 0) return;
-                    Settings probe = Ser.Deserialize<Settings>(text);
-                    if (probe == null) return;
-                }
+                // 标记写入并读回验证成功，才允许删旧目录
+                if (!WriteMigrateMarker(marker, string.Format("从 {0} 迁移了 {1} 个文件", LegacyDataFolderName, copied)))
+                    return;
 
-                WriteMigrateMarker(marker, string.Format("从 {0} 迁移了 {1} 个文件", LegacyDataFolderName, copied));
-                try { Directory.Delete(oldDir, true); }                 // 确认新目录可用后才删旧目录
-                catch { }                                              // 删不掉也没关系，数据已经安全了
+                try { Directory.Delete(oldDir, true); }
+                catch (Exception ex) { AppendLogDirect(newDir, "迁移完成，但旧数据目录删除失败：" + ex.Message); }
 
-                // 不能调 Log()：Log → LogPath → Dir → 又回到本方法。直接写文件。
-                try
-                {
-                    File.AppendAllText(Path.Combine(newDir, "app.log"),
-                        string.Format("{0:yyyy-MM-dd HH:mm:ss}  数据目录已从 {1} 迁移到 {2}\r\n",
-                            DateTime.Now, LegacyDataFolderName, DataFolderName), Encoding.UTF8);
-                }
-                catch { }
+                AppendLogDirect(newDir, string.Format("数据目录已从 {0} 迁移到 {1}（{2} 个文件）",
+                    LegacyDataFolderName, DataFolderName, copied));
             }
             catch
             {
-                // 迁移失败：不写标记，下次启动继续（不要在这里删旧目录）
+                // 迁移失败：不写标记，下次启动继续（绝不在这里删旧目录）
             }
         }
 
-        private static void WriteMigrateMarker(string marker, string note)
+        /// <summary>校验迁移过来的文件内容（"文件存在"不等于"内容完整"）。</summary>
+        private static bool ValidateMigratedFile(string file, string path)
         {
             try
             {
-                File.WriteAllText(marker,
-                    "{\"migratedAt\":\"" + DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss") + "\",\"note\":\"" + note + "\"}\r\n",
-                    Encoding.UTF8);
+                if (!File.Exists(path)) return false;
+                if (file == ConfigFileName)
+                    return Ser.Deserialize<Settings>(File.ReadAllText(path, Encoding.UTF8)) != null;
+                if (file == "stats.json")
+                    return Ser.Deserialize<DailyStats>(File.ReadAllText(path, Encoding.UTF8)) != null;
+                if (file == "history.jsonl")
+                {
+                    int bad;
+                    return VerifyHistoryLines(path, out bad) && bad == 0;
+                }
+                return true;                                          // app.log：存在即可
+            }
+            catch { return false; }
+        }
+
+        /// <summary>历史文件逐行校验：返回"非空行都读得出来"，并给出损坏行数。</summary>
+        private static bool VerifyHistoryLines(string path, out int badLines)
+        {
+            badLines = 0;
+            string[] lines = File.ReadAllLines(path, Encoding.UTF8);
+            for (int i = 0; i < lines.Length; i++)
+            {
+                if (lines[i].Trim().Length == 0) continue;
+                try
+                {
+                    if (Ser.Deserialize<HistoryEntry>(lines[i]) == null) badLines++;
+                }
+                catch { badLines++; }
+            }
+            return badLines == 0;
+        }
+
+        /// <summary>写迁移标记：写入后必须能读回同样的内容才算成功。</summary>
+        private static bool WriteMigrateMarker(string marker, string note)
+        {
+            string text = "{\"migratedAt\":\"" + DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss") + "\",\"note\":\"" + note + "\"}\r\n";
+            try
+            {
+                File.WriteAllText(marker, text, Encoding.UTF8);
+                string back = File.ReadAllText(marker, Encoding.UTF8);
+                return back == text;
+            }
+            catch { return false; }
+        }
+
+        /// <summary>迁移过程中写日志：不能走 Log()，否则 Log→Dir→Migrate 递归。</summary>
+        private static void AppendLogDirect(string dir, string msg)
+        {
+            try
+            {
+                File.AppendAllText(Path.Combine(dir, "app.log"),
+                    string.Format("{0:yyyy-MM-dd HH:mm:ss}  {1}\r\n", DateTime.Now, msg), Encoding.UTF8);
             }
             catch { }
+        }
+
+        /// <summary>供自检：验证配置文件内容。</summary>
+        internal static bool VerifyConfigForTest(string path) { return ValidateMigratedFile(ConfigFileName, path); }
+        /// <summary>供自检：验证统计文件内容。</summary>
+        internal static bool VerifyStatsForTest(string path) { return ValidateMigratedFile("stats.json", path); }
+        /// <summary>供自检：验证历史文件内容。</summary>
+        internal static bool VerifyHistoryForTest(string path, out int badLines)
+        {
+            try { return VerifyHistoryLines(path, out badLines); }
+            catch { badLines = -1; return false; }
+        }
+
+        private static void TryDelete(string path)
+        {
+            try { if (File.Exists(path)) File.Delete(path); }
+            catch { }
+        }
+
+        // ---------- 原子写入（配置 / 统计）----------
+
+        /// <summary>
+        /// 先写 `xxx.tmp` → 验证内容 → 原子替换正式文件。
+        /// 失败时**不动原正式文件**，临时文件也留着方便排查/恢复。
+        /// </summary>
+        private static bool WriteAtomic(string path, string text, Func<string, bool> verify)
+        {
+            string tmp = path + ".tmp";
+            try { File.WriteAllText(tmp, text, Encoding.UTF8); }
+            catch { return false; }
+
+            if (verify != null)
+            {
+                bool ok;
+                try { ok = verify(tmp); }
+                catch { ok = false; }
+                if (!ok) return false;                                 // 不替换正式文件
+            }
+
+            try
+            {
+                if (File.Exists(path)) File.Replace(tmp, path, null, true);
+                else File.Move(tmp, path);
+                return true;
+            }
+            catch { return false; }                                    // 原文件保持原样
+        }
+
+        private static bool VerifySettingsText(string path)
+        {
+            return Ser.Deserialize<Settings>(File.ReadAllText(path, Encoding.UTF8)) != null;
+        }
+
+        private static bool VerifyStatsText(string path)
+        {
+            return Ser.Deserialize<DailyStats>(File.ReadAllText(path, Encoding.UTF8)) != null;
         }
 
         public static string ConfigPath { get { return Path.Combine(Dir, "config.json"); } }
@@ -277,9 +405,12 @@ namespace PomoCC
             s.Rules.RemoveAll(delegate(WatchRule r) { return r == null || r.Exe.Length == 0; });
         }
 
-        public static void SaveSettings(Settings s)
+        /// <summary>原子写配置：写入失败返回 false，原配置保持可用。</summary>
+        public static bool SaveSettings(Settings s)
         {
-            File.WriteAllText(ConfigPath, Ser.Serialize(s), Encoding.UTF8);
+            bool ok = WriteAtomic(ConfigPath, Ser.Serialize(s), VerifySettingsText);
+            if (!ok) Log("写入配置失败（原配置未改动，临时文件保留为 config.json.tmp）");
+            return ok;
         }
 
         // ---------- 每日统计 ----------
@@ -301,16 +432,12 @@ namespace PomoCC
             return DailyStats.NewFor(DateTime.Now);
         }
 
-        public static void SaveStats(DailyStats s)
+        /// <summary>原子写统计：写入失败返回 false，原统计文件保持可用。</summary>
+        public static bool SaveStats(DailyStats s)
         {
-            try
-            {
-                File.WriteAllText(StatsPath, Ser.Serialize(s), Encoding.UTF8);
-            }
-            catch (Exception ex)
-            {
-                Log("写入统计失败：" + ex.Message);
-            }
+            bool ok = WriteAtomic(StatsPath, Ser.Serialize(s), VerifyStatsText);
+            if (!ok) Log("写入统计失败（原文件未改动，临时文件保留为 stats.json.tmp）");
+            return ok;
         }
 
         // ---------- 告状记录 ----------

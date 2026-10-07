@@ -82,6 +82,8 @@ namespace PomoCC
             req.Timeout = 30000;
             req.ReadWriteTimeout = 30000;
             req.UserAgent = "PomoCC/" + App.Version;
+            // 请求带认证头：绝不允许自动跟随重定向，否则 Authorization 会被发到未校验的地址
+            req.AllowAutoRedirect = false;
             if (!string.IsNullOrEmpty(authValue) && authValue != "Bearer ")
                 req.Headers[authHeader] = authValue;
 
@@ -96,6 +98,12 @@ namespace PomoCC
             {
                 using (HttpWebResponse resp = (HttpWebResponse)req.GetResponse())
                 {
+                    int code = (int)resp.StatusCode;
+                    if (code >= 300 && code < 400)
+                        throw new IOException(RedirectNote(code));
+                    if (code < 200 || code > 299)
+                        throw new IOException(string.Format("发信接口返回了非成功状态码 {0}。", code));
+
                     using (StreamReader sr = new StreamReader(resp.GetResponseStream(), Encoding.UTF8))
                     {
                         string text = sr.ReadToEnd();
@@ -106,6 +114,10 @@ namespace PomoCC
             }
             catch (WebException wex)
             {
+                HttpWebResponse wr = wex.Response as HttpWebResponse;
+                if (wr != null && (int)wr.StatusCode >= 300 && (int)wr.StatusCode < 400)
+                    throw new IOException(RedirectNote((int)wr.StatusCode));
+
                 string detail = "";
                 if (wex.Response != null)
                 {
@@ -121,6 +133,13 @@ namespace PomoCC
                 if (detail.Length > 400) detail = detail.Substring(0, 400);
                 throw new IOException(string.Format("发信接口返回错误：{0} {1}", wex.Message, detail));
             }
+        }
+
+        /// <summary>重定向一律不跟随：明确告诉用户把地址填成最终地址。</summary>
+        private static string RedirectNote(int code)
+        {
+            return string.Format("发信接口要求重定向（{0}）。出于安全考虑，本程序不会带着认证信息跟随重定向，" +
+                "请把接口地址直接填成最终地址。", code);
         }
 
         /// <summary>JSON 字符串转义。</summary>

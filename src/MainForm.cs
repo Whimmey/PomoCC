@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Runtime.InteropServices;
@@ -25,6 +25,10 @@ namespace PomoCC
         private NotifyIcon tray;
         private ContextMenuStrip trayMenu;
         private Icon appIcon;
+        private FlatButton btnTestMailTool;
+
+        /// <summary>供自检：主窗口的「测试发信」按钮（验证异步发送时的按钮状态）。</summary>
+        internal FlatButton TestMailButton { get { return btnTestMailTool; } }
 
         private bool reallyExit;
         private bool startHidden;
@@ -233,7 +237,8 @@ namespace PomoCC
             tools.Controls.Add(ToolButton("设置", delegate { OpenSettings(); }), 0, 0);
             tools.Controls.Add(ToolButton("告状记录", delegate { OpenHistory(); }), 1, 0);
             tools.Controls.Add(ToolButton("预览邮件", delegate { PreviewMail(); }), 2, 0);
-            tools.Controls.Add(ToolButton("测试发信", delegate { TestMail(); }), 3, 0);
+            btnTestMailTool = ToolButton("测试发信", delegate { TestMail(); });
+            tools.Controls.Add(btnTestMailTool, 3, 0);
 
             // 今日统计放在卡片底部
             lblToday = new Label();
@@ -664,6 +669,8 @@ namespace PomoCC
             // 传入回调：设置窗口里点「保存」时立即生效，不必等窗口关闭
             using (SettingsForm f = new SettingsForm(sup.Settings, ApplySettings))
             {
+                // 让设置窗口知道当前是否在专注：专注中保存只对下一段生效，界面上要说清楚
+                f.SessionActive = delegate { return sup.IsFocusing; };
                 f.ShowDialog(this);
             }
             RefreshUi();
@@ -678,15 +685,22 @@ namespace PomoCC
             }
         }
 
-        /// <summary>把设置窗口保存的内容立刻应用到运行中的实例。</summary>
+        /// <summary>把设置窗口保存的内容应用到运行中的实例（走 Supervisor 的统一入口）。</summary>
         private void ApplySettings(Settings s)
         {
-            sup.Settings = s;
-            Store.SaveSettings(s);
-            sup.Stats = Store.LoadToday();
-            sup.RefreshWatchList();
+            bool saved = Store.SaveSettings(s);          // 原子写：失败时原配置不会被破坏
+            sup.ApplySettings(s);                        // 专注中保存 = 下一段生效，本段规则不变
             AutoStart.Apply(s.AutoStart);
             RefreshUi();
+
+            if (!saved)
+            {
+                // 关键写入失败必须让用户看见，不能悄悄当成功
+                MessageBox.Show(this,
+                    "设置没能写入磁盘（文件可能被占用或磁盘只读）。\r\n\r\n" +
+                    "这次修改只在内存里生效，重启后会丢失；原来的配置文件没有被破坏。",
+                    "番茄钟监督", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
         }
 
         private void OpenHistory()
@@ -715,29 +729,34 @@ namespace PomoCC
                 "测试发信", MessageBoxButtons.OKCancel, MessageBoxIcon.Question);
             if (r != DialogResult.OK) return;
 
-            string err = null;
-            Cursor = Cursors.WaitCursor;
-            try
+            SendTestMailAsync(snapshot, null, null);
+        }
+
+        /// <summary>
+        /// 「测试发信」的异步外壳（与设置窗口、历史重发共用 AsyncMail 的行为）。
+        /// 自检可以传替身函数与自己的结果处理，避免真发信和弹确认框。
+        /// </summary>
+        internal void SendTestMailAsync(Settings snapshot, Func<string> workOverride, Action<bool, string> onDone)
+        {
+            Func<string> work = workOverride != null ? workOverride : (Func<string>)delegate
             {
                 Mailer.Send(snapshot, "【番茄钟监督】测试邮件",
                     "这是一封测试邮件。\r\n\r\n收到它说明「番茄钟监督」的发信通道已经配置好了，\r\n" +
                     "以后你在规定时间里没坚持完专注、或者偷玩超时，都会通过这个通道自动发信。\r\n");
-            }
-            catch (Exception ex)
-            {
-                err = ex.Message;
-            }
-            finally
-            {
-                Cursor = Cursors.Default;
-            }
+                return "测试邮件已发送成功，去收件箱（和垃圾箱）看看。";
+            };
 
-            if (err == null)
-                MessageBox.Show(this, "测试邮件已发送成功，去收件箱（和垃圾箱）看看。",
-                    "番茄钟监督", MessageBoxButtons.OK, MessageBoxIcon.Information);
-            else
-                MessageBox.Show(this, "发送失败：\r\n\r\n" + err, "番茄钟监督",
-                    MessageBoxButtons.OK, MessageBoxIcon.Error);
+            Action<bool, string> done = onDone != null ? onDone : (Action<bool, string>)delegate(bool ok, string msg)
+            {
+                if (ok)
+                    MessageBox.Show(this, msg, "番茄钟监督", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                else
+                    MessageBox.Show(this, "发送失败：\r\n\r\n" + msg, "番茄钟监督",
+                        MessageBoxButtons.OK, MessageBoxIcon.Error);
+            };
+
+            // 后台线程发信：网络超时时主窗口不假死；期间按钮显示「发送中…」防重复点击
+            AsyncMail.Run(this, btnTestMailTool, "发送中…", "测试发信", work, done);
         }
 
         private void ExitWithPassword()

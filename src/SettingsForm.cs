@@ -13,6 +13,9 @@ namespace PomoCC
         /// <summary>保存时立即回调（让主窗口马上应用，不必等关窗）。</summary>
         private Action<Settings> onSave;
         private Label lblSaveState;
+
+        /// <summary>由主窗口注入：当前是否正在专注（专注中保存 = 下一段才生效）。</summary>
+        internal Func<bool> SessionActive;
         private FlatButton btnProbe, btnTestMail;
         private InputBox inSubjectTpl;
         private InputBox memoIntro;
@@ -954,12 +957,21 @@ namespace PomoCC
             Result = s;
             draft = s.Copy();
             savedAnything = true;
+            bool focusingNow = SessionActive != null && SessionActive();
             if (lblSaveState != null)
             {
                 lblSaveState.ForeColor = Theme.Ok;
-                lblSaveState.Text = "已保存";
+                lblSaveState.Text = focusingNow
+                    ? "已保存\r\n" + NextSessionNotice
+                    : "已保存";
             }
         }
+
+        /// <summary>
+        /// 专注期间保存设置时的提示。产品决策：专注中允许改设置，但本段继续用原设置，
+        /// 下一段专注才生效 —— 免得用户在专注中途改规则把当前这段"改没了"。
+        /// </summary>
+        internal const string NextSessionNotice = "本次专注继续使用原设置，新设置将在下一段专注开始时生效。";
 
         /// <summary>供自检：是否保存过 / 保存状态文字。</summary>
         internal bool SavedAnything { get { return savedAnything; } }
