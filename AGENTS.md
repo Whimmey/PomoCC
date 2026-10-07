@@ -223,7 +223,7 @@ node .\tools\fake-smtp.mjs 2560 .\tests\e2e-message.txt .\tests\e2e-session.txt 
   四个窗口布局零溢出。
 - `--selftest`：**64 项全通过**（0.1 时 18 项 → 0.2 加后台计时/实例/状态机 → Re-v0.2 加规则快照/原子写/协议边界），
   含旧配置迁移、逐条规则阈值边界、「名称」默认值等于「软件」列、自定义名称进入邮件正文、睡眠与未知长间隔、并发与竞态。
-- `--smoketest`：**24 项全通过**；设置窗口的规则表格为 **4 列 × 3 行**，
+- `--smoketest`：**25 项全通过**；设置窗口的规则表格为 **4 列 × 3 行**，
   列名「名称 / 软件 / 规则时长（分钟） / 操作」。
 - `--realsmoke`：7 项全通过，注册表自启测试后恢复原状。
 - `--loadcheck`：直接加载用户真实的 `config.json`，解析成功、密码散列原样保留。
@@ -276,6 +276,13 @@ node .\tools\fake-smtp.mjs 2560 .\tests\e2e-message.txt .\tests\e2e-session.txt 
     `PomoCCSelfTest`，并用 `ReadReal()/RestoreReal()` **原样**恢复。
 15. **自检在 `%TEMP%` 里堆了 177 个临时数据目录**：现在所有临时目录统一登记，
     `Main` 的 `finally` 里统一删除（要保留用 `POMOCC_KEEP_TEMP=1`）。
+16. **「提示音」链接与复选框文字错开 2px（用户上报"明显没对齐"）**：那一行原本用
+    `FlowLayoutPanel` 摆「复选框 + 链接」，而它按**顶边 + 外边距**放孩子 ——
+    复选框带着方框（控件更高）、链接只有文字，两者顶边一对齐，文字基线就差 2px。
+    改成 `TableLayoutPanel` + 两个控件都 `Anchor = AnchorStyles.Left`（垂直居中）后为 0px。
+    新增断言 `settings-sound-row-aligned`（比较两者中心 y，容差 1px）；
+    并且**验证过这条断言不是空的**：临时退回 `FlowLayoutPanel` 重跑，它如实报
+    `FAIL ... 复选框中心 y=14、链接中心 y=16（差 2px）`。
 
 ### 开发期残留自查（每次交付前跑一遍）
 
@@ -349,6 +356,7 @@ Re-v0.2 复审收尾新增（同样在 `SelfTest.cs`）：
 | `dpapi-env-failure-classifier` | 「DPAPI 环境阻塞」与「真代码缺陷」的判定逻辑本身也被测到 |
 | `render-apppicker-has-accent` / `render-apppicker-button-state` | 主按钮按启用/禁用两种**正确**状态各自验证（列表为空时禁用是对的，不要求主色） |
 | `settings-sound-preview-link` / `settings-sound-preview-plays` | 设置里「提示音」三个字是可点链接（蓝字下划线，区域正好 3 个字），点了会播放 |
+| `settings-sound-row-aligned` | 复选框文字与「提示音」链接**垂直居中对齐**（容差 1px）、同一行、链接在右边 |
 | `sound-clip-valid` / `sound-played-is-ours` | 合成的提示音是合法 PCM（时长/峰值不削顶）、且完成提醒响的就是这一声 |
 
 ### 测试对环境的要求（DPAPI 与用户配置文件）
@@ -413,6 +421,10 @@ Re-v0.2 复审收尾新增（同样在 `SelfTest.cs`）：
   所以试听到的就是真触发那一声；试听链接是 `SettingsForm` 里 `chkSound`
   （文字「专注走完时播放」）旁边的 `LinkLabel`，`LinkArea = (0,3)` 正好是「提示音」三个字，
   绑定的处理函数是 `OnSoundPreviewClicked`。
+  **这两个控件必须放在 `TableLayoutPanel` 里并都设 `Anchor = AnchorStyles.Left`**（垂直居中）：
+  早先用 `FlowLayoutPanel` 时它按"顶边 + 外边距"摆孩子，而复选框带方框更高、链接只有文字，
+  两者顶边一对齐文字就错开 2px（用户一眼就看出来了）；`TableLayoutPanel` 不受高度差与 DPI 影响。
+  断言 `settings-sound-row-aligned` 守住这一点（曾用"退回 FlowLayoutPanel"验证过它真的会 FAIL）。
   自检注意：`LinkLabel` 的命中判定基于**真实光标位置**，屏幕外窗口用合成鼠标消息点不到，
   所以 `settings-sound-preview-plays` 是直接触发它绑定的那个处理函数（同一段代码）。
   两个开关 `Settings.NotifyOnComplete` / `NotifySound` 默认开，可在「规则与其他」页关掉。
