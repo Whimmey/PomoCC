@@ -1533,7 +1533,36 @@ namespace PomoCC
                 catch (Exception) { refusedFast = true; }
                 Check(sb, "smtp-refused-errors-quickly", refusedFast, "端口拒绝连接时立刻抛出可读错误", ref fail);
 
-                Check(sb, "settingsform-credit-block",
+                // 设置里「提示音」三个字：蓝色下划线的可点链接，点一下试听
+                // （这一行在「规则与其他」页，先切过去，否则控件不可见、也点不到）
+                ClickNav(sf2, "规则与其他");
+                Pump(400);
+                LinkLabel lnkSound = sf2.SoundPreviewLink;
+                CheckBox chkSnd = sf2.SoundCheckBox;
+                bool linkOk = lnkSound != null && chkSnd != null
+                           && lnkSound.Text == "提示音"
+                           && lnkSound.LinkArea.Start == 0 && lnkSound.LinkArea.Length == 3
+                           && lnkSound.LinkColor == Theme.Link
+                           && lnkSound.LinkBehavior == LinkBehavior.AlwaysUnderline
+                           && lnkSound.AutoSize && lnkSound.Visible
+                           && chkSnd.Text.IndexOf("提示音") < 0;      // 三个字只在链接上，不在复选框文字里
+                Check(sb, "settings-sound-preview-link", linkOk,
+                    string.Format("链接文字「{0}」、可点区域 {1}+{2}、颜色={3}、下划线={4}",
+                        lnkSound == null ? "(无)" : lnkSound.Text,
+                        lnkSound == null ? -1 : lnkSound.LinkArea.Start,
+                        lnkSound == null ? -1 : lnkSound.LinkArea.Length,
+                        lnkSound == null ? "-" : lnkSound.LinkColor.Name,
+                        lnkSound == null ? "-" : lnkSound.LinkBehavior.ToString()), ref fail);
+
+                // 说明：LinkLabel 的命中判定基于**真实光标位置**，而这里窗口在屏幕外，
+                // 合成鼠标消息点不到可点区域，所以直接触发它绑定的处理函数（同一段代码）。
+                int snd0 = Supervisor.SoundPlayCount;
+                sf2.RaiseSoundPreviewForTest();
+                Pump(120);
+                Check(sb, "settings-sound-preview-plays",
+                    Supervisor.SoundPlayCount == snd0 + 1,
+                    string.Format("触发「提示音」链接绑定的处理函数：播放计数 +{0}（与真触发共用同一处播放实现）",
+                        Supervisor.SoundPlayCount - snd0), ref fail);                Check(sb, "settingsform-credit-block",
                     credit.IndexOf("PomoCC " + App.Version) >= 0
                     && credit.IndexOf("可点区域「" + App.Author + "」") >= 0
                     && credit.IndexOf(App.RepoUrl) >= 0,

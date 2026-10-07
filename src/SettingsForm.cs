@@ -49,6 +49,7 @@ namespace PomoCC
         // 规则页
         private NumberBox numFocus, numViolation, numSample;
         private CheckBox chkOnlyAfter, chkAutoStart, chkTray, chkNotify, chkSound;
+        private LinkLabel lnkSoundTest;
 
         // 底部按钮行上的署名（版本号 + 作者链接）
         private LinkLabel lnkAuthor;
@@ -393,9 +394,34 @@ namespace PomoCC
             chkNotify = new CheckBox();
             StyleCheck(chkNotify, "弹托盘气泡提醒我这一段走完了");
             chkSound = new CheckBox();
-            StyleCheck(chkSound, "播放提示音");
+            StyleCheck(chkSound, "专注走完时播放");
+            // 「提示音」三个字做成蓝色下划线链接：点一下试听（走的就是真触发时的播放实现）
+            lnkSoundTest = new LinkLabel();
+            lnkSoundTest.Text = "提示音";
+            lnkSoundTest.Font = Theme.Body;
+            lnkSoundTest.ForeColor = Theme.SubText;
+            lnkSoundTest.LinkColor = Theme.Link;
+            lnkSoundTest.ActiveLinkColor = Theme.LinkActive;
+            lnkSoundTest.VisitedLinkColor = Theme.Link;          // 点过也保持蓝色
+            lnkSoundTest.LinkBehavior = LinkBehavior.AlwaysUnderline;
+            lnkSoundTest.AutoSize = true;
+            lnkSoundTest.Cursor = Cursors.Hand;
+            lnkSoundTest.Margin = new Padding(0, 5, 0, 10);
+            lnkSoundTest.LinkArea = new LinkArea(0, 3);           // 正好是「提示音」三个字
+            lnkSoundTest.LinkClicked += OnSoundPreviewClicked;
+
+            FlowLayoutPanel soundRow = new FlowLayoutPanel();
+            soundRow.FlowDirection = FlowDirection.LeftToRight;
+            soundRow.WrapContents = false;
+            soundRow.AutoSize = true;
+            soundRow.AutoSizeMode = AutoSizeMode.GrowAndShrink;
+            soundRow.BackColor = Theme.Card;
+            soundRow.Margin = new Padding(0);
+            soundRow.Controls.Add(chkSound);
+            soundRow.Controls.Add(lnkSoundTest);
+
             Ui.Add(other, chkNotify);
-            Ui.Add(other, chkSound);
+            Ui.Add(other, soundRow);
             Ui.Add(other, Hint("正常完成不告状，只提醒你自己；上面两个开关默认都开着。"));
 
             Ui.Add(other, Section("启动与安全"));
@@ -972,6 +998,21 @@ namespace PomoCC
         /// 下一段专注才生效 —— 免得用户在专注中途改规则把当前这段"改没了"。
         /// </summary>
         internal const string NextSessionNotice = "本次专注继续使用原设置，新设置将在下一段专注开始时生效。";
+
+        /// <summary>「提示音」链接绑定的处理函数（自检也触发这一处，保证验的是同一段代码）。</summary>
+        private void OnSoundPreviewClicked(object sender, LinkLabelLinkClickedEventArgs e)
+        {
+            Supervisor.PlayNotifySound();
+        }
+
+        /// <summary>供自检：「提示音」试听链接（三个字必须是可点区域）。</summary>
+        internal LinkLabel SoundPreviewLink { get { return lnkSoundTest; } }
+
+        /// <summary>供自检：提示音复选框本身（开关仍然照常工作）。</summary>
+        internal CheckBox SoundCheckBox { get { return chkSound; } }
+
+        /// <summary>供自检：触发「提示音」链接绑定的处理函数（等价于真的点了链接）。</summary>
+        internal void RaiseSoundPreviewForTest() { OnSoundPreviewClicked(lnkSoundTest, null); }
 
         /// <summary>供自检：是否保存过 / 保存状态文字。</summary>
         internal bool SavedAnything { get { return savedAnything; } }

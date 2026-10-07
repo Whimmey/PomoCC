@@ -485,15 +485,20 @@ namespace PomoCC
                 CompleteNoticeCount++;
                 Notify(string.Format("专注完成：{0} 分钟走完了，休息一下。", minutes));
             }
-            if (snapshot != null && snapshot.NotifySound)
-            {
-                SoundPlayCount++;
-                if (!App.Headless)
-                {
-                    try { System.Media.SystemSounds.Asterisk.Play(); }
-                    catch { }
-                }
-            }
+            if (snapshot != null && snapshot.NotifySound) PlayNotifySound();
+        }
+
+        /// <summary>
+        /// 播放「专注走完」的提示音。设置里点「提示音」试听也走这里 ——
+        /// 保证听到的就是真触发时那一声，且只有一处实现。
+        /// 自检（App.Headless）只计数不出声，免得测试环境一直响。
+        /// </summary>
+        public static void PlayNotifySound()
+        {
+            SoundPlayCount++;
+            if (App.Headless) return;
+            try { System.Media.SystemSounds.Asterisk.Play(); }
+            catch { }
         }
 
         /// <summary>供自检：气泡提醒 / 提示音各自触发了多少次。</summary>
