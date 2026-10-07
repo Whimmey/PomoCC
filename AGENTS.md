@@ -216,15 +216,15 @@ node .\tools\fake-smtp.mjs 2560 .\tests\e2e-message.txt .\tests\e2e-session.txt 
 .\dist\PomoCC-番茄钟监督.exe --mail-test .\tests\mailtest.log 127.0.0.1 2560
 ```
 
-### 已验证结果（7 项 exit code 全 0）
+### 已验证结果（9 项 exit code 全 0）
 
 - `--dpicheck`：PerMonitorV2 生效；主窗口 ClientSize 575x725（= 460x580 × 1.25）；
   四个窗口布局零溢出。
-- `--selftest`：18 项全通过，含旧配置迁移、逐条规则阈值边界、
-  「名称」默认值等于「软件」列、自定义名称进入邮件正文。
-- `--smoketest`：8 项全通过；设置窗口的规则表格为 **4 列 × 3 行**，
+- `--selftest`：**61 项全通过**（0.1 时 18 项 → 0.2 加后台计时/实例/状态机 → Re-v0.2 加规则快照/原子写/协议边界），
+  含旧配置迁移、逐条规则阈值边界、「名称」默认值等于「软件」列、自定义名称进入邮件正文、睡眠与未知长间隔、并发与竞态。
+- `--smoketest`：**22 项全通过**；设置窗口的规则表格为 **4 列 × 3 行**，
   列名「名称 / 软件 / 规则时长（分钟） / 操作」。
-- `--realsmoke`：8 项全通过，注册表自启测试后恢复原状。
+- `--realsmoke`：7 项全通过，注册表自启测试后恢复原状。
 - `--loadcheck`：直接加载用户真实的 `config.json`，解析成功、密码散列原样保留。
 - `--smtp-check`：`smtp.qq.com:587` 等 STARTTLS / 隐式 SSL 握手成功。
 - `--mail-test`：完整 SMTP 会话（EHLO → AUTH LOGIN → MAIL FROM → RCPT TO → DATA → `.`），
@@ -320,7 +320,7 @@ node .\tools\fake-smtp.mjs 2560 .\tests\e2e-message.txt .\tests\e2e-session.txt 
 
 | 断言 | 保证什么 |
 |---|---|
-| `ui-blocked-timer-keeps-running` | 主线程阻塞 3 秒，后台仍计时（界面卡顿不少算） |
+| `blocked-ui-time-counted` | 主线程阻塞 3 秒，后台仍计时（界面卡顿不少算） |
 | `sleep-gap-not-counted` / `power-suspend-not-counted` | 睡眠、Suspend 期间的时间不计入专注 |
 | `multi-instance-counted-once` | 同一 exe 多实例不会重复累加规则预算 |
 | `restart-creates-new-instance` | 同 PID 换启动时间 = 新实例，累计时间仍连续 |
@@ -329,6 +329,22 @@ node .\tools\fake-smtp.mjs 2560 .\tests\e2e-message.txt .\tests\e2e-session.txt 
 | `http-url-policy` / `smtp-address-crlf-rejected` | 发信地址边界（明文 http 只允许本机、拒绝换行注入） |
 | `async-send-nonblocking` / `async-send-drops-result-after-close` | 手动发信不卡界面、窗口关掉后丢弃迟到结果 |
 | `migration-retry-after-failure` / `history-concurrent-writes` | 迁移可重试、历史并发写入不交错 |
+
+Re-v0.2 复审收尾新增（同样在 `SelfTest.cs`）：
+
+| 断言 | 保证什么 |
+|---|---|
+| `session-rules-use-snapshot` / `settings-apply-during-session` | 专注中改规则不影响本段（本段规则与计划时间固定） |
+| `settings-apply-next-session-uses-new-rules` | 本段结束后，下一段用新规则 |
+| `settings-apply-shows-next-session-notice` | 专注中保存会提示「下一段专注开始时生效」 |
+| `stats-not-overwritten-during-session` / `settings-apply-race` | 应用设置不丢内存计数；并发 Tick+Apply 不抛异常 |
+| `migration-partial-destination-retries` / `migration-validates-all-copied-files` | 目标残缺会重新复制、迁移结果逐项可验证 |
+| `migration-marker-write-failure-keeps-old-dir` | 标记写不进去时不删旧目录、不谎报完成 |
+| `settings-save-atomic` / `stats-save-atomic` | 写盘失败时原配置/统计保持可用 |
+| `mainform-test-mail-is-async` / `-button-state` / `-close-safe` | 主窗口测试发信也不卡界面、防重复、关窗丢弃结果 |
+| `sleep-gap-with-running-process` / `long-gap-skips-unknown-sample` / `power-resume-resets-baseline` | 睡眠与未知长间隔不计入、也不补采样；Suspend/Resume 不重复累计 |
+| `smtp-rejects-wrong-three-digit-code` / `smtp-multiline-response` | 严格三位状态码、多行响应格式校验 |
+| `http-redirect-is-not-followed` / `http-auth-header-stays-on-original-request` | 不跟随重定向、认证头不外泄（用测试内置的迷你 HTTP 服务器验证） |
 
 自检注入点：`Supervisor.Clock`（换假时钟）、`Supervisor.ProcessScan`（喂假进程表）、
 `Supervisor.ManualTickOnly`（不让后台线程推进）、`Store.RoamingRootOverride`（把 %APPDATA% 指到临时目录）。
@@ -342,12 +358,25 @@ node .\tools\fake-smtp.mjs 2560 .\tests\e2e-message.txt .\tests\e2e-session.txt 
   `AutoStart.RemoveLegacyValue()`（删掉老注册表值名，否则两条自启项会开机启动两次）。
   自检用 `Store.RoamingRootOverride` 把「漫游根」指到临时目录来验证迁移；
   环境变量同时认新名与旧名（`POMOCC_*` 优先，`POMODORO_*` 兜底），防止改名后漏掉开关。
+- **本段专注固定自己的规则快照**：`FocusSession.RuleSnapshot` 在 `StartFocus()` 时生成（`ActiveRules` 的副本），
+  采样只用它 —— 设置窗口在专注期间改规则只影响下一段。界面上保存时会提示"下一段生效"。
+- **设置只能从 `Supervisor.ApplySettings()` 进**：界面不许直接写 `Settings`/`Stats`。
+  该方法在锁内替换设置、刷新全局规则，并把磁盘上的当天统计与内存计数**取较大值合并**，
+  免得用磁盘旧值覆盖后台正在累计的计数。写盘失败要能让用户看见（`Store.SaveSettings` 返回 bool）。
+- **配置/统计是原子写的**：`WriteAtomic()` = 写 `.tmp` → 验证能反序列化 → `File.Replace` 替换；
+  失败时原文件不动、临时文件保留。迁移同理：先复制成 `.migrating` 并**验证内容**
+  （历史要逐行可解析）再落位；目标存在但内容不完整时重新复制；标记必须写入并读回成功才删旧目录。
+- **协议边界**：SMTP 严格比较完整三位状态码（多行响应逐行校验格式），
+  `Connect()` 里的等待句柄用完即释放；HTTP `AllowAutoRedirect = false`，收到 3xx 直接报错，
+  认证头绝不转发到未校验地址。
 - **规则表**：每条 `WatchRule` = 进程名 + 程序自报名 + 用户名称 + 路径 + 规则时长 + 是否启用。
   旧版配置里的「一串进程名」会在加载时自动迁移（时长沿用旧的全局值）。
 - **计时与采样都在后台**：`Supervisor.StartLoop()` 起一个后台线程，每 200ms `Tick()` 一次；
   流逝时间用单调时钟（`Clock`，正式是 `StopwatchClock`，自检可换 `FakeClock`）算，**跟 UI 定时器无关**。
-  超过 `SleepGapSeconds`(15s) 的间隔视为睡眠，不计入；另外接 `SystemEvents.PowerModeChanged`，
-  Suspend 时复位基准、Resume 时再复位一次（双保险）。界面只调 `Read()` 拿只读快照。
+  超过 `SleepGapSeconds`(15s) 的间隔视为睡眠，不计入**并跳过当轮采样**（重置 `LastSampleSeconds`）——
+  否则会把未知的长时间算成监督程序的运行时间，可能直接误判违规。
+  另外接 `SystemEvents.PowerModeChanged`，Suspend 时复位基准、Resume 时再复位一次（双保险）。
+  界面只调 `Read()` 拿只读快照。
 - **偷玩时长按实例采样、按 exe 汇总**：实例身份 = `Exe + PID + 启动时间`（`WatchProcess.Instances`）；
   同一轮采样里同一个 exe **只给规则预算累加一次**（同时开多个实例不会双倍消耗额度），
   各实例的 `Seconds` 只用于显示；规则仍按 exe 汇总判定，符合表格逐行配置的语义。
