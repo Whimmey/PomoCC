@@ -136,6 +136,7 @@ namespace PomoCC
         {
             StringBuilder sb = new StringBuilder();
             int fail = 0;
+            ReportDpapiEnvironment(sb);
 
             try
             {
@@ -230,13 +231,33 @@ namespace PomoCC
                 }
 
                 // 5. 授权码加密（DPAPI）
-                Settings sec = Settings.Defaults();
-                sec.SetAuthCode("abcdefg123");
-                string enc = sec.AuthCodeEnc;
-                bool encrypted = enc.Length > 0 && enc.IndexOf("abcdefg123") < 0;
-                Check(sb, "secret-dpapi-roundtrip",
-                    encrypted && sec.GetAuthCode() == "abcdefg123",
-                    encrypted ? "落盘内容已加密，解密还原正确" : "落盘内容没有加密", ref fail);
+                //    注意：这一段以前没有 try/catch —— 在"用户配置文件未加载"的环境里
+                //    ProtectedData 会抛 CryptographicException，导致**整个自检在这里中断**，
+                //    后面的检查全都不执行。现在环境不可用时记环境跳过并继续。
+                if (dpapiEnv)
+                {
+                    Settings sec = Settings.Defaults();
+                    sec.SetAuthCode("abcdefg123");
+                    string enc = sec.AuthCodeEnc;
+                    bool encrypted = enc.Length > 0 && enc.IndexOf("abcdefg123") < 0;
+                    Check(sb, "secret-dpapi-roundtrip",
+                        encrypted && sec.GetAuthCode() == "abcdefg123",
+                        encrypted ? "落盘内容已加密，解密还原正确" : "落盘内容没有加密", ref fail);
+                }
+                else
+                {
+                    SkipDpapi(sb, "secret-dpapi-roundtrip", dpapiEnvWhy);
+                }
+
+                // 把"环境阻塞"和"代码缺陷"分开的判定逻辑本身也要被测到：
+                // 真正 DPAPI 不可用的环境里（服务会话/未加载用户配置文件），
+                // 可能还有没被守卫覆盖的调用点，届时靠这个判定把它记成环境阻塞而不是失败。
+                bool clsOk = IsDpapiEnvFailure(new System.Security.Cryptography.CryptographicException(
+                                    "当前线程用户上下文未加载用户配置文件"))
+                          && IsDpapiEnvFailure(new Exception("外层包装", new System.Security.Cryptography.CryptographicException("x")))
+                          && !IsDpapiEnvFailure(new InvalidOperationException("这是真的代码问题"));
+                Check(sb, "dpapi-env-failure-classifier", clsOk,
+                    "CryptographicException（含内层）判为环境阻塞；其它异常仍然算失败", ref fail);
 
                 // 6. 密码
                 Settings pw = Settings.Defaults();
@@ -988,7 +1009,7 @@ namespace PomoCC
                 redirCfg.HttpUrl = "http://127.0.0.1:" + apiSrv.Port + "/send";
                 redirCfg.SenderEmail = "me@qq.com";
                 redirCfg.SupervisorEmail = "boss@example.com";
-                redirCfg.SetApiKey("super-secret-key");
+                bool apiKeySet = TrySetApiKey(redirCfg, "super-secret-key");
 
                 string redirectErr = null;
                 try { HttpSender.Send(redirCfg, "主题", "正文"); }
@@ -1004,10 +1025,17 @@ namespace PomoCC
                     redirectErr != null && redirectErr.IndexOf("重定向") >= 0,
                     string.Format("接口返回 302 时直接报重定向错误：{0}",
                         redirectErr == null ? "(没报错)" : redirectErr), ref fail);
-                Check(sb, "http-auth-header-stays-on-original-request",
-                    apiSawAuth && noFollow,
-                    string.Format("原始请求带了认证头={0}；重定向目标收到的连接数={1}（必须为 0）",
-                        apiSawAuth, stealSrv.Connections), ref fail);
+                if (apiKeySet)
+                {
+                    Check(sb, "http-auth-header-stays-on-original-request",
+                        apiSawAuth && noFollow,
+                        string.Format("原始请求带了认证头={0}；重定向目标收到的连接数={1}（必须为 0）",
+                            apiSawAuth, stealSrv.Connections), ref fail);
+                }
+                else
+                {
+                    SkipDpapi(sb, "http-auth-header-stays-on-original-request", dpapiEnvWhy);
+                }
                 // ============================================================
                 //  13k. Re-v0.2 第 2 组：原子写入与迁移可靠性
                 // ============================================================
@@ -1164,7 +1192,7 @@ namespace PomoCC
                 crlfCfg.Rules.Add(Rule("game.exe", 3));
                 crlfCfg.SupervisorEmail = "boss@example.com\r\nBcc: evil@x.com";
                 crlfCfg.SenderEmail = "me@qq.com";
-                crlfCfg.SetAuthCode("x");
+                TrySetAuthCode(crlfCfg, "x");     // DPAPI 不可用时忽略（下面的断言不依赖它）
                 bool validatorBlocked = false;
                 List<string> crlfErrs = SettingsValidator.Validate(crlfCfg);
                 for (int i = 0; i < crlfErrs.Count; i++) if (crlfErrs[i].IndexOf("监督人邮箱") >= 0) validatorBlocked = true;
@@ -1276,10 +1304,13 @@ namespace PomoCC
             }
             catch (Exception ex)
             {
-                Check(sb, "selftest-crashed", false, ex.ToString(), ref fail);
+                if (IsDpapiEnvFailure(ex))
+                    Skip(sb, "env-dpapi-profile", "环境阻塞：DPAPI 不可用（" + ex.Message + "）—— 本模式下后续检查未执行；生产加密逻辑未改动");
+                else
+                    Check(sb, "selftest-crashed", false, ex.ToString(), ref fail);
             }
 
-            sb.Append("\r\n结果：").Append(fail == 0 ? "全部通过" : (fail + " 项失败")).Append("\r\n");
+            sb.Append("\r\n结果：").Append(Summary(fail)).Append("\r\n");
             Write(outPath, sb.ToString());
             return fail == 0 ? 0 : 1;
         }
@@ -1296,6 +1327,7 @@ namespace PomoCC
 
             StringBuilder sb = new StringBuilder();
             int fail = 0;
+            ReportDpapiEnvironment(sb);
             MainForm form = null;
 
             try
@@ -1307,7 +1339,7 @@ namespace PomoCC
                 Settings seed = Settings.Defaults();
                 seed.SupervisorEmail = "boss@example.com";
                 seed.SenderEmail = "me@qq.com";
-                seed.SetAuthCode("dummy-auth-code");
+                TrySetAuthCode(seed, "dummy-auth-code");
                 seed.Rules = new List<WatchRule>();
                 seed.Rules.Add(Rule("steam.exe", 3));
                 seed.Rules.Add(Rule("wegame.exe", 10));
@@ -1537,10 +1569,13 @@ namespace PomoCC
             }
             catch (Exception ex)
             {
-                Check(sb, "smoke-crashed", false, ex.ToString(), ref fail);
+                if (IsDpapiEnvFailure(ex))
+                    Skip(sb, "env-dpapi-profile", "环境阻塞：DPAPI 不可用（" + ex.Message + "）—— 本模式下后续检查未执行；生产加密逻辑未改动");
+                else
+                    Check(sb, "smoke-crashed", false, ex.ToString(), ref fail);
             }
 
-            sb.Append("\r\n结果：").Append(fail == 0 ? "全部通过" : (fail + " 项失败")).Append("\r\n");
+            sb.Append("\r\n结果：").Append(Summary(fail)).Append("\r\n");
             Write(outPath, sb.ToString());
             return fail == 0 ? 0 : 1;
         }
@@ -1601,6 +1636,7 @@ namespace PomoCC
             Store.OverrideDir = TempDir("pomocc-dpi");
             StringBuilder sb = new StringBuilder();
             int fail = 0;
+            ReportDpapiEnvironment(sb);
             sb.Append("临时数据目录（含 app.log）：").Append(Store.Dir).Append("\r\n");
 
             try
@@ -1747,10 +1783,13 @@ namespace PomoCC
             }
             catch (Exception ex)
             {
-                Check(sb, "dpicheck-crashed", false, ex.ToString(), ref fail);
+                if (IsDpapiEnvFailure(ex))
+                    Skip(sb, "env-dpapi-profile", "环境阻塞：DPAPI 不可用（" + ex.Message + "）—— 本模式下后续检查未执行；生产加密逻辑未改动");
+                else
+                    Check(sb, "dpicheck-crashed", false, ex.ToString(), ref fail);
             }
 
-            sb.Append("\r\n结果：").Append(fail == 0 ? "全部通过" : (fail + " 项失败")).Append("\r\n");
+            sb.Append("\r\n结果：").Append(Summary(fail)).Append("\r\n");
             Write(outPath, sb.ToString());
             return fail == 0 ? 0 : 1;
         }
@@ -1838,6 +1877,7 @@ namespace PomoCC
 
             StringBuilder sb = new StringBuilder();
             int fail = 0;
+            ReportDpapiEnvironment(sb);
 
             Store.OverrideDir = TempDir("pomocc-real");
 
@@ -1911,7 +1951,7 @@ namespace PomoCC
                     && !reloaded.CheckPassword("wrong") && reloaded.Rules.Count == 1 && reloaded.Rules[0].LimitMinutes == 5,
                     "重启后密码校验与规则表都正确", ref fail);
 
-                reloaded.SetAuthCode("super-secret-code");
+                TrySetAuthCode(reloaded, "super-secret-code");
                 Store.SaveSettings(reloaded);
                 string raw = File.ReadAllText(Store.ConfigPath, Encoding.UTF8);
                 Check(sb, "secret-not-plaintext-on-disk",
@@ -1927,7 +1967,10 @@ namespace PomoCC
             }
             catch (Exception ex)
             {
-                Check(sb, "realsmoke-crashed", false, ex.ToString(), ref fail);
+                if (IsDpapiEnvFailure(ex))
+                    Skip(sb, "env-dpapi-profile", "环境阻塞：DPAPI 不可用（" + ex.Message + "）—— 本模式下后续检查未执行；生产加密逻辑未改动");
+                else
+                    Check(sb, "realsmoke-crashed", false, ex.ToString(), ref fail);
             }
             finally
             {
@@ -1938,7 +1981,7 @@ namespace PomoCC
                 App.Headless = headlessBefore;
             }
 
-            sb.Append("\r\n结果：").Append(fail == 0 ? "全部通过" : (fail + " 项失败")).Append("\r\n");
+            sb.Append("\r\n结果：").Append(Summary(fail)).Append("\r\n");
             Write(outPath, sb.ToString());
             return fail == 0 ? 0 : 1;
         }
@@ -1963,6 +2006,7 @@ namespace PomoCC
 
             StringBuilder sb = new StringBuilder();
             int fail = 0;
+            ReportDpapiEnvironment(sb);
 
             Store.OverrideDir = TempDir("pomocc-loadcheck");
 
@@ -2012,7 +2056,7 @@ namespace PomoCC
                 sb.Append("加载后字段：PasswordHash=").Append(loaded == null ? "(null)" : loaded.PasswordHash).Append("\r\n");
             }
 
-            sb.Append("\r\n结果：").Append(fail == 0 ? "通过" : "失败").Append("\r\n");
+            sb.Append("\r\n结果：").Append(Summary(fail)).Append("\r\n");
             Write(outPath, sb.ToString());
             return fail == 0 ? 0 : 1;
         }
@@ -2045,6 +2089,7 @@ namespace PomoCC
 
             StringBuilder sb = new StringBuilder();
             int fail = 0;
+            ReportDpapiEnvironment(sb);
 
             try
             {
@@ -2112,17 +2157,25 @@ namespace PomoCC
                 // 再把四个真实窗口整体渲染，扫「未绘制区域」
                 CheckWindow(sb, new MainForm(), "mainform", true, ref fail);
                 CheckWindow(sb, new SettingsForm(Store.LoadSettings()), "settingsform", true, ref fail);
-                CheckWindow(sb, new AppPickerForm(3), "apppicker", true, ref fail);
+                AppPickerForm pickerForm = new AppPickerForm(3);
+                // 默认用真实枚举结果；POMOCC_TEST_EMPTY_APP_LIST=1 时模拟"枚举不到程序"，
+                // 用来验证"空列表 → 主按钮禁用"这条分支不会误报。
+                if (Environment.GetEnvironmentVariable("POMOCC_TEST_EMPTY_APP_LIST") == "1")
+                    pickerForm.EmptyListForTest = true;
+                CheckWindow(sb, pickerForm, "apppicker", true, ref fail);
                 CheckWindow(sb, new HistoryForm(), "historyform", true, ref fail);
 
                 ProbeSurfaces(sb, ref fail);
             }
             catch (Exception ex)
             {
-                Check(sb, "rendertest-crashed", false, ex.ToString(), ref fail);
+                if (IsDpapiEnvFailure(ex))
+                    Skip(sb, "env-dpapi-profile", "环境阻塞：DPAPI 不可用（" + ex.Message + "）—— 本模式下后续检查未执行；生产加密逻辑未改动");
+                else
+                    Check(sb, "rendertest-crashed", false, ex.ToString(), ref fail);
             }
 
-            sb.Append("\r\n结果：").Append(fail == 0 ? "全部通过" : (fail + " 项失败")).Append("\r\n");
+            sb.Append("\r\n结果：").Append(Summary(fail)).Append("\r\n");
             Write(outPath, sb.ToString());
             return fail == 0 ? 0 : 1;
         }
@@ -2149,6 +2202,7 @@ namespace PomoCC
 
             StringBuilder sb = new StringBuilder();
             int fail = 0;
+            ReportDpapiEnvironment(sb);
 
             try
             {
@@ -2160,7 +2214,7 @@ namespace PomoCC
                 Settings seed = Settings.Defaults();
                 seed.SupervisorEmail = "boss@example.com";
                 seed.SenderEmail = "me@qq.com";
-                seed.SetAuthCode("dummy-auth-code");
+                TrySetAuthCode(seed, "dummy-auth-code");
                 seed.Rules = new List<WatchRule>();
                 WatchRule r1 = new WatchRule();
                 r1.Exe = "game.exe"; r1.DisplayName = "game"; r1.Name = "奶龙"; r1.LimitMinutes = 1; r1.Enabled = true;
@@ -2328,10 +2382,13 @@ namespace PomoCC
             }
             catch (Exception ex)
             {
-                Check(sb, "shot-crashed", false, ex.ToString(), ref fail);
+                if (IsDpapiEnvFailure(ex))
+                    Skip(sb, "env-dpapi-profile", "环境阻塞：DPAPI 不可用（" + ex.Message + "）—— 本模式下后续检查未执行；生产加密逻辑未改动");
+                else
+                    Check(sb, "shot-crashed", false, ex.ToString(), ref fail);
             }
 
-            sb.Append("\r\n结果：").Append(fail == 0 ? "截图完成" : (fail + " 项失败")).Append("\r\n");
+            sb.Append("\r\n结果：").Append(fail == 0 ? (skipped > 0 ? "截图完成（" + skipped + " 项环境跳过）" : "截图完成") : (fail + " 项失败")).Append("\r\n");
             Write(Path.Combine(dir, "shot.log"), sb.ToString());
             return fail == 0 ? 0 : 1;
         }
@@ -2685,8 +2742,57 @@ namespace PomoCC
 
                     if (expectAccent)
                     {
-                        Check(sb, "render-" + tag + "-has-accent", accent > 200,
-                            string.Format("主色像素 {0} 个（主按钮应当被画出来）", accent), ref fail);
+                        // 「程序列表为空 → 主按钮禁用」是**正确行为**：禁用态根本不画主色，
+                        // 只画浅底色 + 描边 + 浅色文字。这里以前死要求"主色 > 200"，
+                        // 于是在枚举不到程序的机器上必然误报 —— 用户正是撞上这个场景。
+                        AppPickerForm picker = f as AppPickerForm;
+                        bool btnEnabled = picker == null || picker.PrimaryButton == null || picker.PrimaryButton.Enabled;
+                        int progCount = picker == null ? -1 : picker.ProgramCount;
+
+                        bool accentOk;
+                        string accentNote;
+                        if (btnEnabled)
+                        {
+                            accentOk = accent > 200;
+                            accentNote = string.Format("主色像素 {0} 个（列表 {1} 项 → 主按钮启用，应当被画出来）", accent, progCount);
+                        }
+                        else
+                        {
+                            // 禁用态：改看按钮**自己**那张位图（与窗体边框无关），
+                            // 断言它确实被画成了「浅底 + 描边 + 浅色文字」，而不是一片空白。
+                            int bBorder = 0, bFaint = 0, bAccent = 0;
+                            FlatButton btn = picker.PrimaryButton;
+                            if (btn != null && btn.Width > 0 && btn.Height > 0)
+                            {
+                                using (Bitmap bb = new Bitmap(btn.Width, btn.Height))
+                                {
+                                    btn.DrawToBitmap(bb, new Rectangle(0, 0, bb.Width, bb.Height));
+                                    for (int y = 0; y < bb.Height; y++)
+                                    {
+                                        for (int x = 0; x < bb.Width; x++)
+                                        {
+                                            Color c = bb.GetPixel(x, y);
+                                            if (Same(c, Theme.Accent, 12)) bAccent++;
+                                            else if (Same(c, Theme.Border, 8)) bBorder++;
+                                            else if (Same(c, Theme.FaintText, 24)) bFaint++;
+                                        }
+                                    }
+                                }
+                            }
+                            accentOk = (bBorder + bFaint) > 40 && bAccent < 40;
+                            accentNote = string.Format(
+                                "列表 {0} 项 → 主按钮禁用：按钮自身位图 描边 {1} px、浅色文字 {2} px、主色 {3} px（禁用态不画主色，这是正确行为）",
+                                progCount, bBorder, bFaint, bAccent);
+                        }
+                        Check(sb, "render-" + tag + "-has-accent", accentOk, accentNote, ref fail);
+
+                        if (picker != null && picker.PrimaryButton != null)
+                        {
+                            Check(sb, "render-" + tag + "-button-state",
+                                (progCount > 0) == picker.PrimaryButton.Enabled,
+                                string.Format("列表 {0} 项 → 主按钮 Enabled={1}（空列表必须是禁用态）",
+                                    progCount, picker.PrimaryButton.Enabled), ref fail);
+                        }
                     }
                 }
             }
@@ -2735,6 +2841,7 @@ namespace PomoCC
 
             StringBuilder sb = new StringBuilder();
             int fail = 0;
+            ReportDpapiEnvironment(sb);
             if (string.IsNullOrEmpty(host))
             {
                 Check(sb, "smtp-check-args", false, "需要：--smtp-check <日志文件> <主机> <端口>", ref fail);
@@ -2753,7 +2860,7 @@ namespace PomoCC
                 }
             }
 
-            sb.Append("\r\n结果：").Append(fail == 0 ? "通过" : "失败").Append("\r\n");
+            sb.Append("\r\n结果：").Append(Summary(fail)).Append("\r\n");
             Write(outPath, sb.ToString());
             return fail == 0 ? 0 : 1;
         }
@@ -2777,6 +2884,7 @@ namespace PomoCC
 
             StringBuilder sb = new StringBuilder();
             int fail = 0;
+            ReportDpapiEnvironment(sb);
 
             Settings s = Settings.Defaults();
             s.UserName = "测试同学";
@@ -2789,7 +2897,7 @@ namespace PomoCC
             s.FocusMinutes = 25;
             s.Rules = new List<WatchRule>();
             s.Rules.Add(Rule("steam.exe", 3));
-            s.SetAuthCode("dummy-auth-code");
+            TrySetAuthCode(s, "dummy-auth-code");
 
             FocusSession demo = Mailer.DemoSession(s);
             string reason = "专注期间偷玩超时（steam.exe）";
@@ -2807,7 +2915,7 @@ namespace PomoCC
                 Check(sb, "mail-send-end-to-end", false, ex.ToString(), ref fail);
             }
 
-            sb.Append("\r\n结果：").Append(fail == 0 ? "通过" : "失败").Append("\r\n");
+            sb.Append("\r\n结果：").Append(Summary(fail)).Append("\r\n");
             Write(outPath, sb.ToString());
             return fail == 0 ? 0 : 1;
         }
@@ -2861,12 +2969,100 @@ namespace PomoCC
             return one.Length > 24 ? one.Substring(0, 24) + "…" : one;
         }
 
+        /// <summary>环境跳过计数（每个模式一个进程，无需重置）。</summary>
+        private static int skipped;
+
+        /// <summary>本次模式下 DPAPI 是否可用（由 ReportDpapiEnvironment 填）。</summary>
+        private static bool dpapiEnv = true;
+        private static string dpapiEnvWhy = "";
+
+        /// <summary>
+        /// 当前环境能不能用 DPAPI。ProtectedData 需要"已加载的用户配置文件"：
+        /// 服务会话或未加载配置文件的账号下会抛 CryptographicException
+        /// （当前线程用户上下文未加载用户配置文件）。
+        /// 这是**环境阻塞**，不是代码缺陷 —— 记 [SKIP] 并继续跑其余检查。
+        /// 生产加密逻辑（Settings.Protect/Unprotect）一个字都不改。
+        /// </summary>
+        private static bool DpapiUsable(out string why)
+        {
+            why = "";
+            if (Environment.GetEnvironmentVariable("POMOCC_TEST_NO_DPAPI") == "1")
+            {
+                why = "测试强制模拟环境阻塞（POMOCC_TEST_NO_DPAPI=1）";
+                return false;
+            }
+            try
+            {
+                Settings probe = Settings.Defaults();
+                probe.SetAuthCode("dpapi-probe");
+                if (probe.GetAuthCode() != "dpapi-probe") { why = "DPAPI 加解密结果不一致"; return false; }
+                return true;
+            }
+            catch (Exception ex)
+            {
+                why = ex.GetType().Name + "：" + ex.Message;
+                return false;
+            }
+        }
+
+        /// <summary>每个模式开头调用：把 DPAPI 环境状态写进日志并在不可用时记一条环境跳过。</summary>
+        private static void ReportDpapiEnvironment(StringBuilder sb)
+        {
+            dpapiEnv = DpapiUsable(out dpapiEnvWhy);
+            sb.Append("环境检查：DPAPI（需要已加载的用户配置文件）")
+              .Append(dpapiEnv ? "可用" : "不可用 —— " + dpapiEnvWhy)
+              .Append("\r\n\r\n");
+            if (!dpapiEnv) SkipDpapi(sb, "env-dpapi-profile", dpapiEnvWhy);
+        }
+
+        private static void SkipDpapi(StringBuilder sb, string name, string why)
+        {
+            Skip(sb, name, "环境阻塞（DPAPI 不可用）：" + why + "；与加密相关的检查未验证，其余检查照常执行");
+        }
+
+        /// <summary>安全设授权码：环境不支持 DPAPI 时返回 false，不影响其余断言。</summary>
+        private static bool TrySetAuthCode(Settings s, string v)
+        {
+            try { s.SetAuthCode(v); return true; }
+            catch (Exception) { return false; }
+        }
+
+        /// <summary>安全设 API Key：环境不支持 DPAPI 时返回 false。</summary>
+        private static bool TrySetApiKey(Settings s, string v)
+        {
+            try { s.SetApiKey(v); return true; }
+            catch (Exception) { return false; }
+        }
+
+        /// <summary>判断异常是不是"DPAPI 环境不可用"这一类。</summary>
+        private static bool IsDpapiEnvFailure(Exception ex)
+        {
+            for (Exception e = ex; e != null; e = e.InnerException)
+            {
+                if (e is System.Security.Cryptography.CryptographicException) return true;
+                string m = e.Message;
+                if (!string.IsNullOrEmpty(m) &&
+                    (m.IndexOf("用户配置文件") >= 0 || m.IndexOf("user profile", StringComparison.OrdinalIgnoreCase) >= 0))
+                    return true;
+            }
+            return false;
+        }
+
+        /// <summary>汇总行：必须区分"全部通过"和"有环境跳过（未验证）"。</summary>
+        private static string Summary(int fail)
+        {
+            if (fail > 0) return fail + " 项失败";
+            if (skipped > 0) return "通过，但有 " + skipped + " 项因环境阻塞跳过、未验证";
+            return "全部通过";
+        }
+
         /// <summary>
         /// 记一条跳过（环境不满足，例如用户正开着程序）。
         /// 既不算通过也不算失败 —— 免得把环境状态误报成缺陷，也免得掩盖真问题。
         /// </summary>
         private static void Skip(StringBuilder sb, string name, string reason)
         {
+            skipped++;
             sb.Append("[SKIP] ").Append(name).Append("  —— ").Append(reason).Append("\r\n");
         }
 

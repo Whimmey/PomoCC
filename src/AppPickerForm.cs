@@ -231,7 +231,9 @@ namespace PomoCC
             Cursor = Cursors.WaitCursor;
             try
             {
-                apps = AppCatalog.Enumerate(includeBackground);
+                apps = EmptyListForTest
+                     ? new List<RunningAppInfo>()             // 自检：模拟"一个程序都没枚举到"
+                     : AppCatalog.Enumerate(includeBackground);
                 loaded = true;
             }
             finally
@@ -240,6 +242,15 @@ namespace PomoCC
             }
             FillList();
         }
+
+        /// <summary>供自检：列表里的程序数（0 时「添加选中」是禁用的）。</summary>
+        internal int ProgramCount { get { return grid == null ? 0 : grid.Rows.Count; } }
+
+        /// <summary>供自检：主按钮（列表为空时它是禁用态，渲染颜色与启用态不同）。</summary>
+        internal FlatButton PrimaryButton { get { return okButton; } }
+
+        /// <summary>供自检：模拟枚举不到任何程序，用来验证禁用态渲染。</summary>
+        internal bool EmptyListForTest;
 
         private static Image IconImage(Icon ic)
         {
