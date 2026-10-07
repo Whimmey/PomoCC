@@ -371,6 +371,7 @@ namespace PomoCC
                 s.NotifySound = true;
                 s.Version = 2;
             }
+
             if (s.FocusMinutes <= 0) s.FocusMinutes = d.FocusMinutes;
             if (s.ViolationSeconds <= 0) s.ViolationSeconds = d.ViolationSeconds;
             if (s.SampleSeconds <= 0) s.SampleSeconds = d.SampleSeconds;

@@ -102,7 +102,7 @@ namespace PomoCC
         // 老 v1 配置里没有这两个字段，反序列化后是 false（等于"关"），
         // 所以 Store.Normalize 里按 Version < 2 显式补成 true，否则升级后提醒会静默失效。
         public bool NotifyOnComplete { get; set; }     // 托盘气泡
-        public bool NotifySound { get; set; }          // 系统提示音
+        public bool NotifySound { get; set; }          // 是否响提示音（声音固定是 SoundBank 那一种）
 
         public string PasswordHash { get; set; }
         public string PasswordSalt { get; set; }

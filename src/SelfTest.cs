@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.IO;
@@ -955,6 +955,36 @@ namespace PomoCC
                     string.Format("Suspend 120 秒 + Resume：程序累计 {0}→{1} 秒（只多了恢复后正常的那 5 秒）",
                         pBefore, pAfter), ref fail);
                 // ============================================================
+                //  13m. 提示音：固定一种（木琴轻敲）
+                // ============================================================
+                byte[] bell = SoundBank.Render();
+                int sRate, sBits, sCh, sLen;
+                bool bellHead = ReadWavHeader(bell, out sRate, out sBits, out sCh, out sLen);
+                int bellPeak = 0, bellStart = 0;
+                int bellCount = sLen / 2;
+                for (int k = 0; k < bellCount; k++)
+                {
+                    short v = BitConverter.ToInt16(bell, 44 + k * 2);
+                    int a = v < 0 ? -v : v;
+                    if (a > bellPeak) bellPeak = a;
+                    if (k < sRate / 50 && a > bellStart) bellStart = a;      // 前 20ms
+                }
+                double bellSec = bellCount / (double)sRate;
+                bool bellValid = bellHead && sRate == 44100 && sBits == 16 && sCh == 1
+                              && bellSec > 0.2 && bellSec < 0.6
+                              && bellPeak > 8000 && bellPeak <= 32000        // 够响但不削顶
+                              && bellStart > 3000;                            // 一开头就出声（不是慢慢淡入）
+                Check(sb, "sound-clip-valid", bellValid,
+                    string.Format("「{0}」{1:0.00} 秒，峰值 {2}/32767，起始 20ms 峰值 {3}，PCM 16bit 单声道 {4}Hz",
+                        SoundBank.Name, bellSec, bellPeak, bellStart, sRate), ref fail);
+
+                // 专注走完响的必须是这一声（不再是系统星号音）
+                Supervisor.PlayNotifySound();
+                Check(sb, "sound-played-is-ours", SoundBank.LastPlayed == SoundBank.Name,
+                    string.Format("最近一次播放的是「{0}」", SoundBank.LastPlayed), ref fail);
+
+
+                // ============================================================
                 //  13l. Re-v0.2 第 5 组：发信协议边界
                 // ============================================================
 
@@ -1547,12 +1577,13 @@ namespace PomoCC
                            && lnkSound.AutoSize && lnkSound.Visible
                            && chkSnd.Text.IndexOf("提示音") < 0;      // 三个字只在链接上，不在复选框文字里
                 Check(sb, "settings-sound-preview-link", linkOk,
-                    string.Format("链接文字「{0}」、可点区域 {1}+{2}、颜色={3}、下划线={4}",
+                    string.Format("链接文字「{0}」、可点区域 {1}+{2}（正好三个字）、颜色={3}、下划线={4}、复选框文字「{5}」",
                         lnkSound == null ? "(无)" : lnkSound.Text,
                         lnkSound == null ? -1 : lnkSound.LinkArea.Start,
                         lnkSound == null ? -1 : lnkSound.LinkArea.Length,
                         lnkSound == null ? "-" : lnkSound.LinkColor.Name,
-                        lnkSound == null ? "-" : lnkSound.LinkBehavior.ToString()), ref fail);
+                        lnkSound == null ? "-" : lnkSound.LinkBehavior.ToString(),
+                        chkSnd == null ? "(无)" : chkSnd.Text), ref fail);
 
                 // 说明：LinkLabel 的命中判定基于**真实光标位置**，而这里窗口在屏幕外，
                 // 合成鼠标消息点不到可点区域，所以直接触发它绑定的处理函数（同一段代码）。
@@ -1560,9 +1591,11 @@ namespace PomoCC
                 sf2.RaiseSoundPreviewForTest();
                 Pump(120);
                 Check(sb, "settings-sound-preview-plays",
-                    Supervisor.SoundPlayCount == snd0 + 1,
-                    string.Format("触发「提示音」链接绑定的处理函数：播放计数 +{0}（与真触发共用同一处播放实现）",
-                        Supervisor.SoundPlayCount - snd0), ref fail);                Check(sb, "settingsform-credit-block",
+                    Supervisor.SoundPlayCount == snd0 + 1 && SoundBank.LastPlayed == SoundBank.Name,
+                    string.Format("触发「提示音」链接绑定的处理函数：播放计数 +{0}，播放的是「{1}」（与真触发共用同一处播放实现）",
+                        Supervisor.SoundPlayCount - snd0, SoundBank.LastPlayed), ref fail);
+
+                Check(sb, "settingsform-credit-block",
                     credit.IndexOf("PomoCC " + App.Version) >= 0
                     && credit.IndexOf("可点区域「" + App.Author + "」") >= 0
                     && credit.IndexOf(App.RepoUrl) >= 0,
@@ -2996,6 +3029,19 @@ namespace PomoCC
             if (s == null) return "";
             string one = s.Replace("\r", " ").Replace("\n", " ");
             return one.Length > 24 ? one.Substring(0, 24) + "…" : one;
+        }
+
+        private static bool ReadWavHeader(byte[] w, out int rate, out int bits, out int ch, out int dataLen)
+        {
+            rate = 0; bits = 0; ch = 0; dataLen = 0;
+            if (w == null || w.Length < 44) return false;
+            if (Encoding.ASCII.GetString(w, 0, 4) != "RIFF") return false;
+            if (Encoding.ASCII.GetString(w, 8, 4) != "WAVE") return false;
+            ch = BitConverter.ToInt16(w, 22);
+            rate = BitConverter.ToInt32(w, 24);
+            bits = BitConverter.ToInt16(w, 34);
+            dataLen = BitConverter.ToInt32(w, 40);
+            return dataLen > 0 && 44 + dataLen <= w.Length;
         }
 
         /// <summary>环境跳过计数（每个模式一个进程，无需重置）。</summary>

@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.IO;
@@ -395,6 +395,7 @@ namespace PomoCC
             StyleCheck(chkNotify, "弹托盘气泡提醒我这一段走完了");
             chkSound = new CheckBox();
             StyleCheck(chkSound, "专注走完时播放");
+
             // 「提示音」三个字做成蓝色下划线链接：点一下试听（走的就是真触发时的播放实现）
             lnkSoundTest = new LinkLabel();
             lnkSoundTest.Text = "提示音";
@@ -422,6 +423,8 @@ namespace PomoCC
 
             Ui.Add(other, chkNotify);
             Ui.Add(other, soundRow);
+            Ui.Add(other, Hint(string.Format("提示音固定是「{0}」（一声短促的木琴敲击，点上面的「提示音」可以试听）。",
+                SoundBank.Name)));
             Ui.Add(other, Hint("正常完成不告状，只提醒你自己；上面两个开关默认都开着。"));
 
             Ui.Add(other, Section("启动与安全"));
